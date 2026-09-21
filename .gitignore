@@ -1,0 +1,11 @@
+*.zip
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.png
+*.jpg
+*.jpeg
+*.webp
+private/
+work/

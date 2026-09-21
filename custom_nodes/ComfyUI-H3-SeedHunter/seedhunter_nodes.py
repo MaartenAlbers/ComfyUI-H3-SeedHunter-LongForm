@@ -1,0 +1,291 @@
+"""Audio modes and two-pass continuation for the SeedHunter 2.6 workflow."""
+
+import os
+import importlib
+
+import torch
+import comfy.nested_tensor
+import folder_paths
+import nodes
+from comfy_extras.nodes_audio import load as load_audio, vae_decode_audio
+
+# Resolve the existing H3 package only during execution, after custom-node loading.
+# Do not import its __init__ again or register/patch any of its node classes.
+def _h3(module):
+    anchor = nodes.NODE_CLASS_MAPPINGS.get("MiniMaxH3SongMaskedAVContext")
+    if anchor is None:
+        raise RuntimeError(
+            "SeedHunter requires ComfyUI-H3-Motion-Context-MultiRef "
+            "(tested revision 2ed4b27). Install it and restart ComfyUI.")
+    package = anchor.__module__.rsplit(".", 1)[0]
+    return importlib.import_module(f"{package}.{module}")
+
+
+MODES = ["locked audio", "audio reference", "generate audio", "silent audio"]
+
+
+def _path(value):
+    value = value.strip().strip('"')
+    return value if os.path.isabs(value) else folder_paths.get_annotated_filepath(value)
+
+
+def _stamp(value):
+    path = _path(value)
+    if not os.path.isfile(path):
+        return (path, None)
+    info = os.stat(path)
+    return (path, info.st_size, info.st_mtime_ns)
+
+
+def _silence(frames, rate=32000):
+    return {"waveform": torch.zeros(1, 2, round(frames / 24 * rate)), "sample_rate": rate}
+
+
+class H3SeedHunterAudioInput:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "audio_mode": (MODES,),
+            "audio_file": ("STRING", {"default": "", "tooltip": "Input-folder filename or absolute path. Ignored in generate audio mode."}),
+        }}
+
+    RETURN_TYPES = ("STRING", "AUDIO", "AUDIO")
+    RETURN_NAMES = ("audio_mode", "master_audio", "reference_audio")
+    FUNCTION = "load"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def load(self, audio_mode, audio_file=""):
+        if audio_mode in ("generate audio", "silent audio"):
+            return (audio_mode, None, None)
+        if audio_mode not in MODES:
+            raise ValueError("Unknown SeedHunter audio mode")
+        if not audio_file.strip():
+            raise ValueError("Choose an audio file, or select generate audio.")
+        waveform, rate = load_audio(_path(audio_file))
+        audio = {"waveform": waveform.unsqueeze(0), "sample_rate": rate}
+        return (audio_mode, audio if audio_mode == "locked audio" else None,
+                audio if audio_mode == "audio reference" else None)
+
+    @classmethod
+    def IS_CHANGED(cls, audio_mode, audio_file=""):
+        return audio_mode if audio_mode == "generate audio" else _stamp(audio_file)
+
+
+class H3SeedHunterAudioRouter:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"audio_mode": (MODES,)}, "optional": {
+            name: ("AUDIO", {"lazy": True}) for name in
+            ("master_audio", "reference_1", "reference_2", "reference_3")
+        }}
+
+    RETURN_TYPES = ("STRING", "AUDIO", "AUDIO", "AUDIO", "AUDIO")
+    RETURN_NAMES = ("audio_mode", "master_audio", "reference_1", "reference_2", "reference_3")
+    FUNCTION = "route"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def check_lazy_status(self, audio_mode, **kwargs):
+        active = ("master_audio",) if audio_mode == "locked audio" else (
+            ("reference_1", "reference_2", "reference_3") if audio_mode == "audio reference" else ())
+        return [name for name in active if name in kwargs and kwargs[name] is None]
+
+    def route(self, audio_mode, master_audio=None, reference_1=None, reference_2=None, reference_3=None):
+        if audio_mode == "locked audio":
+            if master_audio is None:
+                raise ValueError("Connect and enable the master Load Audio node for locked audio.")
+            return (audio_mode, master_audio, None, None, None)
+        if audio_mode == "audio reference":
+            if all(a is None for a in (reference_1, reference_2, reference_3)):
+                raise ValueError("Connect and enable at least one reference Load Audio node.")
+            return (audio_mode, None, reference_1, reference_2, reference_3)
+        if audio_mode in ("generate audio", "silent audio"): 
+            return (audio_mode, None, None, None, None)
+        raise ValueError("Unknown SeedHunter audio mode")
+
+
+class H3SeedHunterSourceVideo:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "start_mode": (["new clip", "extend video"],),
+            "video": ("STRING", {"default": ""}),
+            "use_source_audio": ("BOOLEAN", {"default": True, "tooltip": "Disable for a silent source video. New audio will start in the extension."}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "AUDIO", "INT")
+    RETURN_NAMES = ("source_frames", "source_audio", "frame_count")
+    FUNCTION = "load"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def load(self, start_mode, video="", use_source_audio=True):
+        if start_mode == "new clip":
+            return (None, None, 0)
+        path = _path(video)
+        if not os.path.isfile(path):
+            raise ValueError("Select an existing local source video, or select new clip.")
+        # VHS owns decoding and path validation. Load the full source for assembly;
+        # the context nodes themselves select the tail at each target resolution.
+        frames, count, audio, _ = nodes.NODE_CLASS_MAPPINGS["VHS_LoadVideoPath"]().load_video(
+            video=path, force_rate=24, custom_width=0, custom_height=0,
+            frame_load_cap=0, skip_first_frames=0, select_every_nth=1, format="None")
+        return (frames, dict(audio) if use_source_audio else _silence(count), count)
+
+    @classmethod
+    def IS_CHANGED(cls, start_mode, video="", use_source_audio=True):
+        return start_mode if start_mode == "new clip" else (_stamp(video), use_source_audio)
+
+
+class H3SeedHunterAVContext:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "latent": ("LATENT",), "vae": ("VAE",), "audio_vae": ("VAE",),
+            "audio_mode": ("STRING", {"forceInput": True}),
+            "clip_start_seconds": ("FLOAT", {"default": 0.0, "min": 0.0, "step": 0.001}),
+            "context_length": ("INT", {"default": 39, "min": 39, "step": 51}),
+        }, "optional": {
+            "master_audio": ("AUDIO",), "source_frames": ("IMAGE",), "source_audio": ("AUDIO",),
+        }}
+
+    RETURN_TYPES = ("LATENT", "INT", "AUDIO")
+    RETURN_NAMES = ("latent", "overlap_frames", "locked_clip_audio")
+    FUNCTION = "prepare"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def prepare(self, latent, vae, audio_vae, audio_mode, clip_start_seconds=0.0,
+                context_length=39, master_audio=None, source_frames=None, source_audio=None):
+        n = 0
+        if source_frames is not None:
+            video, _ = _h3("existing_video_extension")._streams_from_latent(latent)
+            n = _h3("existing_video_extension")._snap_context_length(context_length, len(source_frames), _h3("existing_video_extension")._pixel_frames(video.shape[2]))
+        if audio_mode == "locked audio":
+            if master_audio is None:
+                raise ValueError("Locked audio needs a master audio file.")
+            return _h3("h3_song_audio_context").MiniMaxH3SongMaskedAVContext().prepare(
+                latent, audio_vae, master_audio, clip_start_seconds, n, 24.0,
+                "disabled", vae=vae, source_frames=source_frames)
+        if audio_mode not in MODES:
+            raise ValueError("Unknown SeedHunter audio mode")
+        if source_frames is None:
+            out = latent.copy()
+            out.pop("noise_mask", None)
+            return (out, 0, None)
+        if source_audio is None:
+            source_audio = _silence(len(source_frames))
+        out, overlap, _, _ = _h3("existing_video_extension").MiniMaxH3ExistingVideoMaskedContext().prepare(
+            latent, vae, audio_vae, source_frames, source_audio, 24.0,
+            n, "disabled", audio_feather_ticks=0)
+        return (out, overlap, None)
+
+
+class H3SeedHunterRefineContext:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "latent": ("LATENT",), "vae": ("VAE",),
+            "overlap_frames": ("INT", {"forceInput": True}),
+        }, "optional": {"source_frames": ("IMAGE",)}}
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "prepare"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def prepare(self, latent, vae, overlap_frames, source_frames=None):
+        _h3("existing_video_extension")._require_h3_mask_support()
+        video, audio = _h3("existing_video_extension")._streams_from_latent(latent)
+        video = video.clone()
+        vm = torch.ones((1, 1, *video.shape[2:]), device=video.device, dtype=torch.float32)
+        am = torch.zeros((1, 1, *audio.shape[2:]), device=audio.device, dtype=torch.float32)
+        n = int(overlap_frames)
+        if n:
+            if source_frames is None or len(source_frames) < n:
+                raise ValueError("Final pass needs the same source frames used by the previews.")
+            frames = _h3("existing_video_extension")._resize_images(source_frames[-n:], video.shape[4] * 16, video.shape[3] * 16, "disabled")
+            prefix = vae.encode(frames)
+            steps = prefix.shape[2]
+            if _h3("existing_video_extension")._pixel_frames(steps) != n or steps >= video.shape[2]:
+                raise ValueError("Final-pass overlap does not fit the H3 temporal grid.")
+            video[:, :, :steps] = prefix.to(device=video.device, dtype=video.dtype)
+            vm[:, :, :steps] = 0
+        out = latent.copy()
+        out["samples"] = comfy.nested_tensor.NestedTensor((video, audio))
+        out["noise_mask"] = comfy.nested_tensor.NestedTensor((vm, am))
+        return (out,)
+
+
+class H3SeedHunterOutputAudio:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "latent": ("LATENT",), "audio_vae": ("VAE",),
+            "audio_mode": ("STRING", {"forceInput": True}),
+        }, "optional": {"locked_clip_audio": ("AUDIO",)}}
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "decode"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def decode(self, latent, audio_vae, audio_mode, locked_clip_audio=None):
+        video, _ = _h3("existing_video_extension")._streams_from_latent(latent)
+        if audio_mode == "silent audio":
+            return (_silence(_h3("existing_video_extension")._pixel_frames(video.shape[2])),)
+        if audio_mode == "locked audio":
+            if locked_clip_audio is None:
+                raise ValueError("Locked clip audio is missing.")
+            return (locked_clip_audio,)
+        audio = vae_decode_audio(audio_vae, latent)
+        return (_h3("existing_video_extension")._canonical_audio(audio, audio["sample_rate"], _h3("existing_video_extension")._pixel_frames(video.shape[2])),)
+
+
+class H3SeedHunterAssemble:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "images": ("IMAGE",), "audio": ("AUDIO",),
+            "overlap_frames": ("INT", {"forceInput": True}),
+        }, "optional": {"source_frames": ("IMAGE",), "source_audio": ("AUDIO",)}}
+
+    RETURN_TYPES = ("IMAGE", "AUDIO")
+    FUNCTION = "assemble"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def assemble(self, images, audio, overlap_frames, source_frames=None, source_audio=None):
+        sr = int(audio["sample_rate"])
+        audio = _h3("existing_video_extension")._canonical_audio(audio, sr, len(images))
+        if source_frames is None:
+            return (images, audio)
+        n = int(overlap_frames)
+        if n < 1 or n >= len(images) or n > len(source_frames):
+            raise ValueError("Assembly overlap must match the context used for sampling.")
+        source = _h3("existing_video_extension")._resize_images(source_frames, images.shape[2], images.shape[1], "disabled")
+        if source_audio is None:
+            source_audio = _silence(len(source), sr)
+        source_audio = _h3("existing_video_extension")._canonical_audio(source_audio, sr, len(source))
+        weight = torch.linspace(0, 1, n, device=images.device, dtype=images.dtype).reshape(n, 1, 1, 1)
+        seam = source[-n:].to(images.device) * (1 - weight) + images[:n] * weight
+        result = torch.cat((source[:-n].to(images.device), seam, images[n:]), dim=0)
+        cut = round((len(source) - n) / 24 * sr)
+        # Difference of rounded boundaries keeps accumulated duration exact.
+        overlap_samples = round(len(source) / 24 * sr) - cut
+        wave = audio["waveform"]
+        previous = source_audio["waveform"].to(device=wave.device, dtype=wave.dtype)
+        weight_a = torch.linspace(0, 1, overlap_samples, device=wave.device, dtype=wave.dtype)
+        seam_a = previous[..., cut:] * (1 - weight_a) + wave[..., :overlap_samples] * weight_a
+        joined = torch.cat((previous[..., :cut], seam_a, wave[..., overlap_samples:]), dim=-1)
+        output = _h3("existing_video_extension")._canonical_audio({"waveform": joined, "sample_rate": sr}, sr, len(result))
+        return (result, output)
+
+
+NODE_CLASS_MAPPINGS = {cls.__name__: cls for cls in (
+    H3SeedHunterAudioInput, H3SeedHunterAudioRouter, H3SeedHunterSourceVideo, H3SeedHunterAVContext,
+    H3SeedHunterRefineContext, H3SeedHunterOutputAudio, H3SeedHunterAssemble,
+)}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "H3SeedHunterAudioInput": "H3 SeedHunter Audio Mode",
+    "H3SeedHunterAudioRouter": "H3 SeedHunter Audio Mode — External Loaders",
+    "H3SeedHunterSourceVideo": "H3 SeedHunter New Clip / Extend Video",
+    "H3SeedHunterAVContext": "H3 SeedHunter Preview AV Context",
+    "H3SeedHunterRefineContext": "H3 SeedHunter Final Context + Keep Selected Audio",
+    "H3SeedHunterOutputAudio": "H3 SeedHunter Output Audio",
+    "H3SeedHunterAssemble": "H3 SeedHunter Seamless Assembly",
+}
