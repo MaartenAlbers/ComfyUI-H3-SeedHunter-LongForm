@@ -9,3 +9,5 @@
 *.webp
 private/
 work/
+__pycache__/
+*.pyc

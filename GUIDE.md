@@ -87,6 +87,12 @@ Enable the preview candidates you want and click **Run**. The default preview re
 
 Review both picture and sound. The fast latent preview is only a progress aid; judge timing, duration and synchronization from the saved preview video.
 
+### Optional single-pass mode
+
+Use **SINGLE PASS MODE — CONFIGURABLE RESOLUTION** when you want one direct generation instead of three previews followed by selection and refinement.
+
+Set **preview_megapixels** for normal preview mode and **single_pass_megapixels** for the direct run. Click **TURN ON SINGLE PASS** to keep Preview 1 active while bypassing Preview 2, Preview 3, preview selection, hybrid refinement and full-sequence assembly. Click **RESTORE PREVIEW MODE** to restore the previously active routing. The control title and color show the active mode, and the main resolution selector is synchronized automatically.
+
 ## 7. Select one preview
 
 Enable exactly one group:
@@ -144,4 +150,3 @@ Advance the clip number only after accepting the result. Keep a copy of the work
 
 - SeedHunter foundation: [Fox•Fur•Essence Films](https://www.youtube.com/@foxfuressence)
 - Long-form protected motion-context foundation: [Seitanism — ComfyUI-H3-Motion-Context-MultiRef](https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef)
-

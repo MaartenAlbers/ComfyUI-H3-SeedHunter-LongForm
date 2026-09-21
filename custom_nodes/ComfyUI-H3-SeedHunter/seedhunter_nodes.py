@@ -276,9 +276,29 @@ class H3SeedHunterAssemble:
         return (result, output)
 
 
+class H3SeedHunterSinglePassControl:
+    """UI preset controller; its browser extension switches the workflow routes."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "preview_megapixels": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 4.0, "step": 0.05}),
+            "single_pass_megapixels": ("FLOAT", {"default": 1.5, "min": 0.1, "max": 4.0, "step": 0.05}),
+        }}
+
+    RETURN_TYPES = ("FLOAT", "FLOAT")
+    RETURN_NAMES = ("preview_megapixels", "single_pass_megapixels")
+    FUNCTION = "values"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    def values(self, preview_megapixels, single_pass_megapixels):
+        return (float(preview_megapixels), float(single_pass_megapixels))
+
+
 NODE_CLASS_MAPPINGS = {cls.__name__: cls for cls in (
     H3SeedHunterAudioInput, H3SeedHunterAudioRouter, H3SeedHunterSourceVideo, H3SeedHunterAVContext,
     H3SeedHunterRefineContext, H3SeedHunterOutputAudio, H3SeedHunterAssemble,
+    H3SeedHunterSinglePassControl,
 )}
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterAudioInput": "H3 SeedHunter Audio Mode",
@@ -288,4 +308,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterRefineContext": "H3 SeedHunter Final Context + Keep Selected Audio",
     "H3SeedHunterOutputAudio": "H3 SeedHunter Output Audio",
     "H3SeedHunterAssemble": "H3 SeedHunter Seamless Assembly",
+    "H3SeedHunterSinglePassControl": "H3 SeedHunter Single Pass Control",
 }

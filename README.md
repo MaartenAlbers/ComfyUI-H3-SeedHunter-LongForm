@@ -6,7 +6,7 @@ An experimental ComfyUI workflow for generating several MiniMax H3 preview candi
 
 Download the latest release package from the repository's **Releases** page. The workflow file is:
 
-`H3_SeedHunter_Long_Form_Video_v1.2_PUBLIC.json`
+`H3_SeedHunter_Long_Form_Video_v1.3.json`
 
 Models and example media are not included.
 
@@ -14,6 +14,7 @@ Models and example media are not included.
 
 - Three fast SeedHunter preview candidates.
 - One selected 1.5 MP refinement pass.
+- Configurable one-click single-pass mode.
 - Seamless audiovisual continuation with protected overlap.
 - Locked soundtrack, audio-reference and generated-audio modes.
 - Optional low-VRAM and sparse-attention controls.
@@ -24,7 +25,7 @@ Models and example media are not included.
 2. Install the external custom-node dependencies below, preferably with ComfyUI Manager.
 3. Download the required MiniMax H3 models.
 4. Restart ComfyUI.
-5. Load `H3_SeedHunter_Long_Form_Video_v1.2_PUBLIC.json`.
+5. Load `H3_SeedHunter_Long_Form_Video_v1.3.json`.
 6. Replace the empty image, audio and optional source-video inputs before running.
 7. Read [GUIDE.md](GUIDE.md), especially the preview-selection and extension sections.
 
