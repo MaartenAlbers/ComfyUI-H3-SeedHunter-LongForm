@@ -239,6 +239,7 @@ def project_snapshot(output_directory, project_name):
         "previous_clip_video": absolute(latest.get("video", "")),
         "previous_context_latent": absolute(latest.get("context", "")),
         "master_audio": absolute(settings.get("master_audio", "")),
+        "final_render": absolute(data.get("final_render", "")),
         "workflow_settings": dict(settings.get("workflow", {})),
         "prompt": prompt,
         "reference_images": list(latest.get("reference_images", [])),

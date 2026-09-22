@@ -45,6 +45,42 @@ function ensureSourcePreview(source) {
     return video;
 }
 
+function ensureTimelinePreview(node) {
+    node.properties ||= {};
+    if (node.seedhunterTimelineVideoElement) return node.seedhunterTimelineVideoElement;
+    if (typeof node.addDOMWidget !== "function") return null;
+    const video = document.createElement("video");
+    video.controls = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.style.width = "100%";
+    video.style.maxHeight = "420px";
+    video.style.background = "#111";
+    video.style.borderRadius = "6px";
+    video.style.display = "none";
+    node.addDOMWidget("ASSEMBLED TIMELINE PREVIEW", "video", video, {
+        serialize: false,
+        hideOnZoom: false,
+        getMinHeight: () => video.style.display === "none" ? 0 : 300,
+    });
+    node.seedhunterTimelineVideoElement = video;
+    return video;
+}
+
+function disableLegacyAssembly() {
+    const projectMode = (app.graph?._nodes || []).some((node) => node.type === TYPE);
+    if (!projectMode) return;
+    for (const node of app.graph?._nodes || []) {
+        const title = node.title || "";
+        if (node.type === "H3SeedHunterAssemble" || title.includes("FULL SEAMLESS VIDEO")) {
+            node.mode = 4;
+            node.properties ||= {};
+            node.properties.seedhunter_project_legacy_disabled = true;
+            node.setDirtyCanvas?.(true, true);
+        }
+    }
+}
+
 function updateClipDisplay(snapshot) {
     const display = findNode((item) => item.type === "H3SeedHunterProjectClipIndex");
     if (!display) return;
@@ -281,6 +317,20 @@ function applySnapshot(node, snapshot) {
     node.title = `PROJECT — ${snapshot.status}`;
     node.color = "#346b6d";
     node.bgcolor = "#203b3c";
+    const timelinePreview = ensureTimelinePreview(node);
+    if (timelinePreview) {
+        if (snapshot.final_render) {
+            const projectName = String(widget(node, "project_name")?.value || "");
+            timelinePreview.src = `/seedhunter/project/final-video?project_name=${encodeURIComponent(projectName)}&revision=${encodeURIComponent(snapshot.revision)}`;
+            timelinePreview.style.display = "block";
+            timelinePreview.load();
+            node.size[1] = Math.max(Number(node.size?.[1] || 0), 700);
+        } else {
+            timelinePreview.pause();
+            timelinePreview.removeAttribute("src");
+            timelinePreview.style.display = "none";
+        }
+    }
 
     const clipNumber = findNode((item) =>
         (item.title || "").includes("NEXT CLIP NUMBER")
@@ -552,6 +602,8 @@ function install(node) {
             notify(`Found ${projects.length} project(s).`);
         } catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
+    ensureTimelinePreview(node);
+    disableLegacyAssembly();
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 620);
     node.size[1] = Math.max(Number(node.size?.[1] || 0), 370);
 
@@ -570,10 +622,16 @@ app.registerExtension({
         }
         lockProjectContextPrefixes();
         refreshAcceptButtonState();
+        disableLegacyAssembly();
     },
 });
 
 if (!window.seedhunterAcceptModeListenerInstalled) {
     window.seedhunterAcceptModeListenerInstalled = true;
     window.addEventListener("seedhunter-mode-changed", refreshAcceptButtonState);
+}
+
+if (!window.seedhunterLegacyAssemblyListenerInstalled) {
+    window.seedhunterLegacyAssemblyListenerInstalled = true;
+    window.addEventListener("seedhunter-mode-changed", disableLegacyAssembly);
 }
