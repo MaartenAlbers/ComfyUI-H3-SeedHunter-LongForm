@@ -4,6 +4,19 @@ $source = Join-Path $root 'H3_SeedHunter_Long_Form_Video_v1.3.1.json'
 $target = Join-Path $root 'H3_SeedHunter_Long_Form_Video_v1.4_DEV.json'
 $workflow = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json
 
+# Project mode owns these transient staging paths. They are hidden and locked
+# by the frontend as well, so accepted project assets cannot be orphaned by an
+# edited filename prefix.
+$singleContext = $workflow.nodes | Where-Object { $_.title -like '*SAVE SINGLE PASS CONTEXT*' }
+$finalContext = $workflow.nodes | Where-Object { $_.title -like '*ARCHIVE ACCEPTED FINAL CHECKPOINT*' }
+if (-not $singleContext -or -not $finalContext) {
+    throw 'The source workflow is missing a context checkpoint node.'
+}
+$singleContext.widgets_values[0] = 'h3_resume/seedhunter_v14/single/clip'
+$singleContext.widgets_values_named.filename_prefix = 'h3_resume/seedhunter_v14/single/clip'
+$finalContext.widgets_values[0] = 'h3_resume/seedhunter_v14/final/clip'
+$finalContext.widgets_values_named.filename_prefix = 'h3_resume/seedhunter_v14/final/clip'
+
 if ($workflow.nodes | Where-Object type -eq 'H3SeedHunterProject') {
     throw 'The source workflow already contains an H3SeedHunterProject node.'
 }

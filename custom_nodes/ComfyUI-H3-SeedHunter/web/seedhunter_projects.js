@@ -1,6 +1,8 @@
 import { app } from "/scripts/app.js";
 
 const TYPE = "H3SeedHunterProject";
+const SINGLE_PASS_CONTEXT_PREFIX = "h3_resume/seedhunter_v14/single/clip";
+const FINAL_PASS_CONTEXT_PREFIX = "h3_resume/seedhunter_v14/final/clip";
 
 function widget(node, name) {
     return node?.widgets?.find((item) => item.name === name);
@@ -352,6 +354,27 @@ function singlePassIsActive() {
     return control?.properties?.seedhunter_mode === "single";
 }
 
+function lockProjectContextPrefixes() {
+    for (const node of app.graph?._nodes || []) {
+        if (node.type !== "MiniMaxH3MotionContextSaveLatent") continue;
+        const title = node.title || "";
+        const prefix = title.includes("SAVE SINGLE PASS CONTEXT")
+            ? SINGLE_PASS_CONTEXT_PREFIX
+            : title.includes("ARCHIVE ACCEPTED FINAL CHECKPOINT")
+                ? FINAL_PASS_CONTEXT_PREFIX
+                : null;
+        if (!prefix) continue;
+        const item = widget(node, "filename_prefix") || node.widgets?.[0];
+        if (!item) continue;
+        item.value = prefix;
+        item.type = "hidden";
+        item.computeSize = () => [0, -4];
+        node.properties ||= {};
+        node.properties.seedhunter_locked_context_prefix = prefix;
+        node.setDirtyCanvas?.(true, true);
+    }
+}
+
 async function acceptRenderedClip(outputNode) {
     const projectNode = findNode((item) => item.type === TYPE);
     const project = projectNode?.properties?.seedhunter_project;
@@ -375,7 +398,9 @@ async function acceptRenderedClip(outputNode) {
     const prompt = String(valueOfNode("MiniMaxH3ReferenceToVideo", "ROLLING CLIP", "prompt") || "");
     const audioMode = String(valueOfNode("H3SeedHunterAudioRouter", "AUDIO MODE", "audio_mode") || "");
     const fps = Number(widget(outputNode, "frame_rate")?.value || 24);
-    const contextPrefix = String(widget(contextSave, "filename_prefix")?.value || contextSave.widgets?.[0]?.value || "");
+    const contextPrefix = singlePassOutput
+        ? SINGLE_PASS_CONTEXT_PREFIX
+        : FINAL_PASS_CONTEXT_PREFIX;
     const referenceImages = [];
     for (let index = 1; index <= 4; index += 1) {
         const picture = findNode((item) =>
@@ -465,6 +490,7 @@ function install(node) {
         return;
     }
     if (node.type !== TYPE) return;
+    lockProjectContextPrefixes();
     if (widget(node, "CREATE NEW PROJECT")) {
         refreshProjectSelector(node).catch((error) => console.warn("[SeedHunter]", error));
         return;
@@ -510,5 +536,6 @@ app.registerExtension({
             install(node);
             installAcceptButton(node);
         }
+        lockProjectContextPrefixes();
     },
 });
