@@ -6,6 +6,7 @@ const BYPASS = 4;
 const PREVIEW_OUTPUTS = ["HYBRID PREVIEW 1", "HYBRID PREVIEW 2", "HYBRID PREVIEW 3"];
 const CONTROLLED_GROUPS = ["SELECT PREVIEW 1", "SELECT PREVIEW 2", "SELECT PREVIEW 3", "HYBRID FINAL UPSCALE PASS"];
 const SINGLE_PASS_CONTEXT_SAVE = "SAVE SINGLE PASS CONTEXT";
+const FINAL_PASS_CHOOSER = "CHOOSE PREVIEW FOR FINAL PASS";
 const ASPECT_RATIOS = {
     "1:1 (Square)": [1, 1],
     "2:3 (Portrait Photo)": [2, 3],
@@ -63,6 +64,65 @@ function controlledNodes() {
 function setMode(node, mode) {
     node.mode = Number(mode);
     node.setDirtyCanvas?.(true, true);
+}
+
+function previewOutputNodes() {
+    return PREVIEW_OUTPUTS.map(findNode).filter(Boolean);
+}
+
+function selectedPreviewNumber() {
+    const selected = (app.graph?._nodes || []).find((node) =>
+        /^PREVIEW [123] SELECTED$/.test(node.title || "") && Number(node.mode ?? NORMAL) !== BYPASS
+    );
+    const match = (selected?.title || "").match(/PREVIEW ([123]) SELECTED/);
+    return match ? Number(match[1]) : null;
+}
+
+function armFinalPass(chooser) {
+    const selected = selectedPreviewNumber();
+    if (!selected) throw new Error("Choose Preview 1, 2, or 3 first.");
+    chooser.properties ||= {};
+    chooser.properties.seedhunter_preview_output_modes = Object.fromEntries(
+        previewOutputNodes().map((node) => [String(node.id), Number(node.mode ?? NORMAL)])
+    );
+    for (const node of previewOutputNodes()) setMode(node, BYPASS);
+    const finalOutput = findNode("FINAL SELECTED CLIP");
+    if (!finalOutput) throw new Error("The final selected clip output was not found.");
+    setMode(finalOutput, NORMAL);
+    chooser.title = `FINAL PASS ARMED — PREVIEW ${selected} ONLY`;
+    chooser.color = "#c16d18";
+    chooser.bgcolor = "#3d2715";
+    chooser.setDirtyCanvas?.(true, true);
+    notify(`Final Pass armed. Only Preview ${selected} can be evaluated.`);
+}
+
+function restorePreviewOutputs(chooser) {
+    const saved = chooser.properties?.seedhunter_preview_output_modes || {};
+    for (const node of previewOutputNodes()) {
+        setMode(node, Object.prototype.hasOwnProperty.call(saved, String(node.id)) ? saved[String(node.id)] : NORMAL);
+    }
+    chooser.properties ||= {};
+    chooser.properties.seedhunter_preview_output_modes = {};
+    chooser.title = FINAL_PASS_CHOOSER;
+    chooser.color = "#f66744";
+    chooser.bgcolor = "#181414";
+    chooser.setDirtyCanvas?.(true, true);
+    notify("Preview output nodes restored.");
+}
+
+function installFinalPassControl(node) {
+    const title = node.title || "";
+    if ((!title.includes(FINAL_PASS_CHOOSER) && !title.includes("FINAL PASS ARMED")) || widget(node, "ARM FINAL PASS")) return;
+    const arm = node.addWidget("button", "ARM FINAL PASS", null, () => {
+        try { armFinalPass(node); } catch (error) { alert(`SeedHunter: ${error.message}`); }
+    }, {serialize: false});
+    const restore = node.addWidget("button", "RESTORE PREVIEW OUTPUTS", null, () => {
+        try { restorePreviewOutputs(node); } catch (error) { alert(`SeedHunter: ${error.message}`); }
+    }, {serialize: false});
+    arm.serializeValue = () => undefined;
+    restore.serializeValue = () => undefined;
+    node.size[0] = Math.max(Number(node.size?.[0] || 0), 450);
+    node.size[1] = Math.max(Number(node.size?.[1] || 0), 180);
 }
 
 function aspectRatio(control) {
@@ -273,11 +333,11 @@ function install(node) {
 
 app.registerExtension({
     name: "SeedHunter.SinglePassControls",
-    async nodeCreated(node) { collapseResolutionHelper(node); install(node); },
-    async loadedGraphNode(node) { collapseResolutionHelper(node); install(node); },
+    async nodeCreated(node) { collapseResolutionHelper(node); install(node); installFinalPassControl(node); },
+    async loadedGraphNode(node) { collapseResolutionHelper(node); install(node); installFinalPassControl(node); },
     async afterConfigureGraph() {
         for (const node of app.graph?._nodes || []) collapseResolutionHelper(node);
-        for (const node of app.graph?._nodes || []) install(node);
+        for (const node of app.graph?._nodes || []) { install(node); installFinalPassControl(node); }
         for (const node of app.graph?._nodes || []) {
             if (node.type === TYPE) {
                 syncActiveResolution(node);
