@@ -10,6 +10,7 @@ from server import PromptServer
 from .seedhunter_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from .project_state import (
     accept_clip,
+    checkout_clip,
     create_project,
     list_projects,
     project_snapshot,
@@ -92,6 +93,24 @@ async def load_seedhunter_project(request):
         data = await request.json()
         name = str(data.get("project_name", ""))
         return web.json_response(project_snapshot(folder_paths.get_output_directory(), name))
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except (ValueError, OSError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+
+@PromptServer.instance.routes.post("/seedhunter/project/checkout")
+async def checkout_seedhunter_project_clip(request):
+    """Move the active project head without deleting later clip records."""
+    try:
+        data = await request.json()
+        snapshot = checkout_clip(
+            folder_paths.get_output_directory(),
+            str(data.get("project_name", "")),
+            str(data.get("project_token", "")),
+            str(data.get("record_id", "")),
+        )
+        return web.json_response(snapshot)
     except FileNotFoundError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except (ValueError, OSError) as exc:

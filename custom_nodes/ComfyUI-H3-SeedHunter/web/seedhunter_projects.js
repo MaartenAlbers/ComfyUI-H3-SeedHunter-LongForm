@@ -78,6 +78,63 @@ async function requestProject(action, projectName) {
     return result;
 }
 
+async function checkoutProject(node, recordId) {
+    const project = node.properties?.seedhunter_project;
+    if (!project?.project_token) throw new Error("Load a project first.");
+    const response = await fetch("/seedhunter/project/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            project_name: String(widget(node, "project_name")?.value || ""),
+            project_token: project.project_token,
+            record_id: recordId,
+        }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not change the active timeline.");
+    applySnapshot(node, result);
+    notify(`Active head changed; project now expects clip ${result.next_clip_index}.`);
+}
+
+function updateContinuationSelector(node, snapshot) {
+    const clips = Array.isArray(snapshot.clip_choices) ? snapshot.clip_choices : [];
+    const entries = [{ label: "Start from beginning", record_id: "" }, ...clips.map((clip) => ({
+        label: `${clip.label} · ${String(clip.record_id).slice(0, 8)}`,
+        record_id: clip.record_id,
+    }))];
+    const labels = entries.map((entry) => entry.label);
+    node.properties ||= {};
+    node.properties.seedhunter_clip_choice_map = Object.fromEntries(
+        entries.map((entry) => [entry.label, entry.record_id])
+    );
+    let selector = widget(node, "CONTINUE FROM CLIP");
+    if (!selector) {
+        selector = node.addWidget("combo", "CONTINUE FROM CLIP", labels[0], async (value) => {
+            if (selector.seedhunterUpdating) return;
+            const recordId = node.properties?.seedhunter_clip_choice_map?.[value];
+            if (recordId === undefined) return;
+            const current = node.properties?.seedhunter_project?.active_head_id || "";
+            if (recordId === current) return;
+            const proceed = window.confirm(
+                `Set '${value}' as the active continuation point? Later clips remain stored.`
+            );
+            if (!proceed) {
+                updateContinuationSelector(node, node.properties.seedhunter_project);
+                return;
+            }
+            try { await checkoutProject(node, recordId); }
+            catch (error) { alert(`SeedHunter Project: ${error.message}`); }
+        }, { values: labels, serialize: false });
+    } else {
+        selector.options ||= {};
+        selector.options.values = labels;
+    }
+    const selected = entries.find((entry) => entry.record_id === (snapshot.active_head_id || ""));
+    selector.seedhunterUpdating = true;
+    selector.value = selected?.label || labels[0];
+    selector.seedhunterUpdating = false;
+}
+
 async function fetchProjects() {
     const response = await fetch("/seedhunter/projects");
     const result = await response.json();
@@ -155,6 +212,7 @@ function applySnapshot(node, snapshot) {
     node.properties.seedhunter_project = snapshot;
     setWidget(node, "action", "load project");
     updateClipDisplay(snapshot);
+    updateContinuationSelector(node, snapshot);
 
     const status = widget(node, "PROJECT STATUS");
     if (status) status.value = snapshot.status;
@@ -343,7 +401,7 @@ function install(node) {
         } catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 620);
-    node.size[1] = Math.max(Number(node.size?.[1] || 0), 270);
+    node.size[1] = Math.max(Number(node.size?.[1] || 0), 310);
 
     const saved = node.properties.seedhunter_project;
     if (saved?.status) applySnapshot(node, saved);

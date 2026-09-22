@@ -40,7 +40,10 @@ class ProjectStateTests(unittest.TestCase):
         _, directory = project_state.create_project(self.output, "Film One")
         path = directory / "project.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        data["accepted_clips"] = [{"index": 2}]
+        data["accepted_clips"] = [{
+            "record_id": "record-2", "parent_record_id": "", "index": 2,
+        }]
+        data["active_timeline"] = ["record-2"]
         data["next_clip_index"] = 3
         path.write_text(json.dumps(data), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "consecutively"):
@@ -51,10 +54,13 @@ class ProjectStateTests(unittest.TestCase):
         path = directory / "project.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         data["accepted_clips"] = [{
+            "record_id": "record-1",
+            "parent_record_id": "",
             "index": 1,
             "video": "../../outside.mp4",
             "context": "context/clip_00001.safetensors",
         }]
+        data["active_timeline"] = ["record-1"]
         data["next_clip_index"] = 2
         path.write_text(json.dumps(data), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "outside"):
@@ -87,7 +93,7 @@ class ProjectStateTests(unittest.TestCase):
         self.assertEqual(Path(snapshot["previous_clip_video"]).read_bytes(), b"video")
         self.assertEqual(Path(snapshot["previous_context_latent"]).read_bytes(), b"latent")
         self.assertEqual(
-            (directory / "prompts" / "clip_00001.txt").read_text(encoding="utf-8"),
+            (directory / "prompts" / "clip_00001_take_001.txt").read_text(encoding="utf-8"),
             "A test prompt",
         )
         self.assertEqual(snapshot["prompt"], "A test prompt")
@@ -152,6 +158,59 @@ class ProjectStateTests(unittest.TestCase):
             {item["project_id"] for item in projects},
             {first["project_id"], second["project_id"]},
         )
+
+    def test_checkout_preserves_descendants_and_creates_new_take(self):
+        data, _ = project_state.create_project(self.output, "Film One")
+        video = self.output / "render.mp4"
+        context = self.output / "render.safetensors"
+        video.write_bytes(b"video")
+        context.write_bytes(b"latent")
+        snapshot = None
+        for index in range(1, 6):
+            token = f"{data['project_id']}:1" if snapshot is None else snapshot["project_token"]
+            snapshot = project_state.accept_clip(
+                self.output, "Film One", token, index, video, context,
+                f"Prompt {index}", 243, 0 if index == 1 else 39,
+                "generate audio", 24.0,
+            )
+
+        clip3 = next(item for item in snapshot["clip_choices"] if item["index"] == 3)
+        rewound = project_state.checkout_clip(
+            self.output, "Film One", snapshot["project_token"], clip3["record_id"]
+        )
+        self.assertEqual(rewound["next_clip_index"], 4)
+        self.assertIn("3 active / 5 stored", rewound["status"])
+
+        branched = project_state.accept_clip(
+            self.output, "Film One", rewound["project_token"], 4,
+            video, context, "Alternative 4", 243, 39,
+            "generate audio", 24.0,
+        )
+        alternatives = [
+            item for item in branched["clip_choices"] if item["index"] == 4
+        ]
+        self.assertEqual([item["take"] for item in alternatives], [1, 2])
+        self.assertTrue(Path(branched["previous_clip_video"]).name.endswith("take_002.mp4"))
+
+    def test_schema_one_project_migrates_without_losing_clip(self):
+        data, directory = project_state.create_project(self.output, "Film One")
+        path = directory / "project.json"
+        data["schema_version"] = 1
+        data.pop("active_timeline")
+        data["accepted_clips"] = [{
+            "index": 1,
+            "video": "clips/clip_00001.mp4",
+            "context": "context/clip_00001.safetensors",
+            "prompt": "prompts/clip_00001.txt",
+        }]
+        data["next_clip_index"] = 2
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+        migrated, _ = project_state.load_project(self.output, "Film One")
+        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(len(migrated["active_timeline"]), 1)
+        self.assertEqual(migrated["next_clip_index"], 2)
+        self.assertEqual(migrated["accepted_clips"][0]["take"], 1)
 
 
 if __name__ == "__main__":

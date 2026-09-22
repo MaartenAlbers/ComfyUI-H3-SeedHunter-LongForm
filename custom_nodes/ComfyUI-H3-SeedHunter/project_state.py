@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROJECTS_FOLDER = "h3_projects"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,79}$")
 
@@ -102,6 +102,7 @@ def create_project(output_directory, project_name):
         },
         "next_clip_index": 1,
         "accepted_clips": [],
+        "active_timeline": [],
         "final_render": "",
     }
     _write_json_atomic(path, data)
@@ -117,8 +118,38 @@ def load_project(output_directory, project_name):
         )
     with path.open("r", encoding="utf-8") as stream:
         data = json.load(stream)
+    if data.get("schema_version") == 1:
+        data = _migrate_v1_manifest(data)
+        _write_json_atomic(path, data)
     validate_manifest(data, directory)
     return data, directory
+
+
+def _migrate_v1_manifest(data):
+    migrated = dict(data)
+    previous = ""
+    timeline = []
+    clips = []
+    namespace = uuid.uuid5(uuid.NAMESPACE_URL, str(data.get("project_id", "seedhunter")))
+    for old in data.get("accepted_clips", []):
+        clip = dict(old)
+        index = int(clip["index"])
+        record_id = str(uuid.uuid5(namespace, f"legacy-clip-{index}"))
+        clip.update({
+            "record_id": record_id,
+            "parent_record_id": previous,
+            "take": 1,
+        })
+        clips.append(clip)
+        timeline.append(record_id)
+        previous = record_id
+    migrated["schema_version"] = SCHEMA_VERSION
+    migrated["accepted_clips"] = clips
+    migrated["active_timeline"] = timeline
+    migrated["next_clip_index"] = len(timeline) + 1
+    migrated["revision"] = int(migrated.get("revision", 0)) + 1
+    migrated["updated_at"] = _now()
+    return migrated
 
 
 def validate_manifest(data, directory):
@@ -135,13 +166,28 @@ def validate_manifest(data, directory):
     clips = data.get("accepted_clips")
     if not isinstance(clips, list):
         raise ValueError("project.json accepted_clips must be a list.")
-    expected = 1
+    records = {}
     for clip in clips:
-        if not isinstance(clip, dict) or int(clip.get("index", -1)) != expected:
-            raise ValueError("Accepted clips must be numbered consecutively from 1.")
-        expected += 1
-    if int(data.get("next_clip_index", -1)) != expected:
-        raise ValueError("next_clip_index does not follow the accepted clip list.")
+        if not isinstance(clip, dict) or not clip.get("record_id"):
+            raise ValueError("Every accepted clip must have a record_id.")
+        if clip["record_id"] in records:
+            raise ValueError("Accepted clip record_ids must be unique.")
+        records[clip["record_id"]] = clip
+    timeline = data.get("active_timeline")
+    if not isinstance(timeline, list):
+        raise ValueError("project.json active_timeline must be a list.")
+    previous = ""
+    for expected, record_id in enumerate(timeline, start=1):
+        clip = records.get(record_id)
+        if clip is None:
+            raise ValueError("Active timeline references an unknown clip record.")
+        if int(clip.get("index", -1)) != expected:
+            raise ValueError("Active timeline clips must be numbered consecutively.")
+        if str(clip.get("parent_record_id", "")) != previous:
+            raise ValueError("Active timeline contains a broken parent chain.")
+        previous = record_id
+    if int(data.get("next_clip_index", -1)) != len(timeline) + 1:
+        raise ValueError("next_clip_index does not follow the active timeline.")
     if Path(directory).name != data["name"]:
         raise ValueError("Project folder name and manifest name do not match.")
 
@@ -149,7 +195,10 @@ def validate_manifest(data, directory):
 def project_snapshot(output_directory, project_name):
     data, directory = load_project(output_directory, project_name)
     clips = data["accepted_clips"]
-    latest = clips[-1] if clips else {}
+    records = {clip["record_id"]: clip for clip in clips}
+    timeline_ids = data["active_timeline"]
+    timeline = [records[record_id] for record_id in timeline_ids]
+    latest = timeline[-1] if timeline else {}
 
     def absolute(relative):
         if not relative:
@@ -167,9 +216,19 @@ def project_snapshot(output_directory, project_name):
         if prompt_path.is_file():
             prompt = prompt_path.read_text(encoding="utf-8")
     status = (
-        f"{data['name']}: {len(clips)} accepted clip(s); "
+        f"{data['name']}: {len(timeline)} active / {len(clips)} stored clip(s); "
         f"next clip {data['next_clip_index']}; revision {data['revision']}"
     )
+    clip_choices = [
+        {
+            "record_id": clip["record_id"],
+            "index": int(clip["index"]),
+            "take": int(clip.get("take", 1)),
+            "active": clip["record_id"] in timeline_ids,
+            "label": f"Clip {clip['index']} · Take {clip.get('take', 1)}",
+        }
+        for clip in clips
+    ]
     return {
         "project_path": str(directory),
         "project_id": str(data["project_id"]),
@@ -181,6 +240,8 @@ def project_snapshot(output_directory, project_name):
         "master_audio": absolute(settings.get("master_audio", "")),
         "prompt": prompt,
         "reference_images": list(latest.get("reference_images", [])),
+        "active_head_id": latest.get("record_id", ""),
+        "clip_choices": clip_choices,
         "status": status,
     }
 
@@ -263,6 +324,34 @@ def _copy_atomic(source, destination):
         raise
 
 
+def checkout_clip(output_directory, project_name, project_token, record_id):
+    data, directory = load_project(output_directory, project_name)
+    expected_token = f"{data['project_id']}:{data['revision']}"
+    if str(project_token) != expected_token:
+        raise ValueError("Project state changed. Reload it before changing timeline.")
+    records = {clip["record_id"]: clip for clip in data["accepted_clips"]}
+    wanted = str(record_id)
+    if wanted and wanted not in records:
+        raise ValueError("Selected continuation clip does not exist in this project.")
+    timeline = []
+    seen = set()
+    current = wanted
+    while current:
+        if current in seen:
+            raise ValueError("Clip ancestry contains a cycle.")
+        seen.add(current)
+        clip = records[current]
+        timeline.append(current)
+        current = str(clip.get("parent_record_id", ""))
+    timeline.reverse()
+    data["active_timeline"] = timeline
+    data["next_clip_index"] = len(timeline) + 1
+    data["revision"] = int(data["revision"]) + 1
+    data["updated_at"] = _now()
+    _write_json_atomic(directory / "project.json", data)
+    return project_snapshot(output_directory, project_name)
+
+
 def accept_clip(
     output_directory,
     project_name,
@@ -303,9 +392,17 @@ def accept_clip(
     if rate <= 0:
         raise ValueError("FPS must be positive.")
 
-    video_destination = directory / "clips" / f"clip_{index:05d}.mp4"
-    context_destination = directory / "context" / f"clip_{index:05d}.safetensors"
-    prompt_destination = directory / "prompts" / f"clip_{index:05d}.txt"
+    parent = data["active_timeline"][-1] if data["active_timeline"] else ""
+    take = 1 + sum(
+        1 for clip in data["accepted_clips"]
+        if int(clip.get("index", -1)) == index
+        and str(clip.get("parent_record_id", "")) == parent
+    )
+    record_id = str(uuid.uuid4())
+    stem = f"clip_{index:05d}_take_{take:03d}"
+    video_destination = directory / "clips" / f"{stem}.mp4"
+    context_destination = directory / "context" / f"{stem}.safetensors"
+    prompt_destination = directory / "prompts" / f"{stem}.txt"
 
     # Originals remain untouched. The manifest is updated only after both large
     # assets and the prompt have reached their final project locations.
@@ -314,7 +411,10 @@ def accept_clip(
     prompt_destination.write_text(str(prompt), encoding="utf-8", newline="\n")
 
     data["accepted_clips"].append({
+        "record_id": record_id,
+        "parent_record_id": parent,
         "index": index,
+        "take": take,
         "video": video_destination.relative_to(directory).as_posix(),
         "context": context_destination.relative_to(directory).as_posix(),
         "prompt": prompt_destination.relative_to(directory).as_posix(),
@@ -326,6 +426,7 @@ def accept_clip(
         "reference_images": [str(value) for value in (reference_images or [])],
         "accepted_at": _now(),
     })
+    data["active_timeline"].append(record_id)
     data["next_clip_index"] = index + 1
     data["revision"] = int(data["revision"]) + 1
     data["updated_at"] = _now()
