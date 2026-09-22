@@ -21,6 +21,28 @@ function findNode(predicate) {
     return (app.graph?._nodes || []).find(predicate);
 }
 
+function ensureSourcePreview(source) {
+    source.properties ||= {};
+    if (source.seedhunterSourceVideoElement) return source.seedhunterSourceVideoElement;
+    if (typeof source.addDOMWidget !== "function") return null;
+    const video = document.createElement("video");
+    video.controls = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.style.width = "100%";
+    video.style.maxHeight = "360px";
+    video.style.background = "#111";
+    video.style.borderRadius = "6px";
+    video.style.display = "none";
+    source.addDOMWidget("PROJECT SOURCE PREVIEW", "video", video, {
+        serialize: false,
+        hideOnZoom: false,
+        getMinHeight: () => video.style.display === "none" ? 0 : 260,
+    });
+    source.seedhunterSourceVideoElement = video;
+    return video;
+}
+
 function notify(message) {
     app.extensionManager?.toast?.add?.({
         severity: "success", summary: "SeedHunter Project", detail: message, life: 5000,
@@ -149,7 +171,21 @@ function applySnapshot(node, snapshot) {
             );
         }
         sourceStatus.value = extending ? snapshot.previous_clip_video : "new clip";
+        const preview = ensureSourcePreview(source);
+        if (preview) {
+            if (extending) {
+                const projectName = String(widget(node, "project_name")?.value || "");
+                preview.src = `/seedhunter/project/source-video?project_name=${encodeURIComponent(projectName)}&revision=${encodeURIComponent(snapshot.revision)}`;
+                preview.style.display = "block";
+                preview.load();
+            } else {
+                preview.pause();
+                preview.removeAttribute("src");
+                preview.style.display = "none";
+            }
+        }
         source.size[0] = Math.max(Number(source.size?.[0] || 0), 650);
+        if (extending) source.size[1] = Math.max(Number(source.size?.[1] || 0), 620);
         source.setDirtyCanvas?.(true, true);
     }
 
@@ -158,6 +194,7 @@ function applySnapshot(node, snapshot) {
     );
     if (promptNode && typeof snapshot.prompt === "string" && snapshot.prompt) {
         setWidget(promptNode, "prompt", snapshot.prompt);
+        promptNode.setDirtyCanvas?.(true, true);
     }
 
     const references = Array.isArray(snapshot.reference_images) ? snapshot.reference_images : [];

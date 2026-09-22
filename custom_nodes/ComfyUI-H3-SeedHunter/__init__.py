@@ -106,6 +106,22 @@ async def list_seedhunter_projects(request):
     })
 
 
+@PromptServer.instance.routes.get("/seedhunter/project/source-video")
+async def seedhunter_project_source_video(request):
+    """Stream the accepted project source MP4 to the embedded node preview."""
+    try:
+        name = str(request.query.get("project_name", ""))
+        snapshot = project_snapshot(folder_paths.get_output_directory(), name)
+        video = snapshot.get("previous_clip_video", "")
+        if not video or not os.path.isfile(video):
+            return web.json_response({"error": "Project has no accepted source video."}, status=404)
+        return web.FileResponse(video, headers={"Cache-Control": "no-store"})
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except (ValueError, OSError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+
 @PromptServer.instance.routes.post("/seedhunter/project/accept")
 async def accept_seedhunter_project_clip(request):
     """Commit the rendered MP4 and its matching H3 latent as one clip pair."""
