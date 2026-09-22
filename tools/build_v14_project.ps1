@@ -17,6 +17,16 @@ $singleContext.widgets_values_named.filename_prefix = 'h3_resume/seedhunter_v14/
 $finalContext.widgets_values[0] = 'h3_resume/seedhunter_v14/final/clip'
 $finalContext.widgets_values_named.filename_prefix = 'h3_resume/seedhunter_v14/final/clip'
 
+$formatControl = $workflow.nodes | Where-Object type -eq 'H3SeedHunterSinglePassControl'
+if (-not $formatControl) { throw 'The source workflow is missing its format control node.' }
+$formatControl.widgets_values = @(0.5, 1.5, '16:9 (Widescreen)', 1.5)
+$formatControl.widgets_values_named = [pscustomobject]@{
+    preview_megapixels = 0.5
+    single_pass_megapixels = 1.5
+    aspect_ratio = '16:9 (Widescreen)'
+    final_pass_megapixels = 1.5
+}
+
 if ($workflow.nodes | Where-Object type -eq 'H3SeedHunterProject') {
     throw 'The source workflow already contains an H3SeedHunterProject node.'
 }

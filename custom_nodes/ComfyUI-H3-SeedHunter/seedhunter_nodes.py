@@ -363,15 +363,29 @@ class H3SeedHunterSinglePassControl:
         return {"required": {
             "preview_megapixels": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 4.0, "step": 0.05}),
             "single_pass_megapixels": ("FLOAT", {"default": 1.5, "min": 0.1, "max": 4.0, "step": 0.05}),
+            "aspect_ratio": ([
+                "16:9 (Widescreen)", "9:16 (Portrait Widescreen)",
+                "1:1 (Square)", "2:3 (Portrait Photo)", "3:2 (Photo)",
+                "3:4 (Portrait Standard)", "4:3 (Standard)",
+                "21:9 (Ultrawide)",
+            ],),
+            "final_pass_megapixels": ("FLOAT", {"default": 1.5, "min": 0.1, "max": 4.0, "step": 0.05}),
         }}
 
-    RETURN_TYPES = ("FLOAT", "FLOAT")
-    RETURN_NAMES = ("preview_megapixels", "single_pass_megapixels")
+    RETURN_TYPES = ("FLOAT", "FLOAT", "STRING", "FLOAT")
+    RETURN_NAMES = (
+        "preview_megapixels", "single_pass_megapixels", "aspect_ratio",
+        "final_pass_megapixels",
+    )
     FUNCTION = "values"
     CATEGORY = "conditioning/minimax/seedhunter"
 
-    def values(self, preview_megapixels, single_pass_megapixels):
-        return (float(preview_megapixels), float(single_pass_megapixels))
+    def values(self, preview_megapixels, single_pass_megapixels, aspect_ratio,
+               final_pass_megapixels):
+        return (
+            float(preview_megapixels), float(single_pass_megapixels),
+            str(aspect_ratio), float(final_pass_megapixels),
+        )
 
 
 class H3SeedHunterProject:

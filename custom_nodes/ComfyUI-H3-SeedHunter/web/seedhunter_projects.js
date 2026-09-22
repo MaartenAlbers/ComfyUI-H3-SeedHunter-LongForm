@@ -210,6 +210,8 @@ function collectProjectSettings() {
         context_frames: Number(valueOfNode("H3SeedHunterAVContext", "PREVIEW", "context_length") || 39),
         preview_megapixels: Number(widget(control, "preview_megapixels")?.value || 0.5),
         single_pass_megapixels: Number(widget(control, "single_pass_megapixels")?.value || 1.5),
+        final_pass_megapixels: Number(widget(control, "final_pass_megapixels")?.value || 1.5),
+        aspect_ratio: String(widget(control, "aspect_ratio")?.value || "16:9 (Widescreen)"),
         run_mode: control?.properties?.seedhunter_mode === "single" ? "single" : "preview",
     };
 }
@@ -232,11 +234,20 @@ function applyProjectSettings(snapshot) {
 
     const control = findNode((item) => item.type === "H3SeedHunterSinglePassControl");
     if (control) {
+        control.properties ||= {};
+        control.properties.seedhunter_project_aspect_locked = "";
         if (settings.preview_megapixels !== undefined) {
             setWidget(control, "preview_megapixels", Number(settings.preview_megapixels));
         }
         if (settings.single_pass_megapixels !== undefined) {
             setWidget(control, "single_pass_megapixels", Number(settings.single_pass_megapixels));
+        }
+        if (settings.final_pass_megapixels !== undefined) {
+            setWidget(control, "final_pass_megapixels", Number(settings.final_pass_megapixels));
+        }
+        if (settings.aspect_ratio) setWidget(control, "aspect_ratio", settings.aspect_ratio);
+        if (Number(snapshot.next_clip_index || 1) > 1 && settings.aspect_ratio) {
+            control.properties.seedhunter_project_aspect_locked = settings.aspect_ratio;
         }
         const buttonName = settings.run_mode === "single"
             ? "TURN ON SINGLE PASS"

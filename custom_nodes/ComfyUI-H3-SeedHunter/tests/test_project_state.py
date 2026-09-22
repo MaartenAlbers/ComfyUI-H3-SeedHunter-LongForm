@@ -118,6 +118,8 @@ class ProjectStateTests(unittest.TestCase):
             "clip_seconds": 8.5,
             "preview_megapixels": 0.6,
             "single_pass_megapixels": 1.8,
+            "final_pass_megapixels": 1.5,
+            "aspect_ratio": "9:16 (Portrait Widescreen)",
             "context_frames": 56,
             "audio_mode": "generate audio",
             "run_mode": "single",

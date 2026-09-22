@@ -362,6 +362,7 @@ def _clean_workflow_settings(settings):
         "clip_seconds": (0.1, 3600.0),
         "preview_megapixels": (0.1, 4.0),
         "single_pass_megapixels": (0.1, 4.0),
+        "final_pass_megapixels": (0.1, 4.0),
         "context_frames": (1, 9999),
     }
     for name, (minimum, maximum) in numeric.items():
@@ -381,6 +382,17 @@ def _clean_workflow_settings(settings):
         if mode not in ("preview", "single"):
             raise ValueError("Project run mode must be preview or single.")
         cleaned["run_mode"] = mode
+    if "aspect_ratio" in settings:
+        aspect = str(settings["aspect_ratio"])
+        allowed = {
+            "1:1 (Square)", "2:3 (Portrait Photo)", "3:2 (Photo)",
+            "3:4 (Portrait Standard)", "4:3 (Standard)",
+            "9:16 (Portrait Widescreen)", "16:9 (Widescreen)",
+            "21:9 (Ultrawide)",
+        }
+        if aspect not in allowed:
+            raise ValueError("Project contains an unknown aspect ratio.")
+        cleaned["aspect_ratio"] = aspect
     return cleaned
 
 
