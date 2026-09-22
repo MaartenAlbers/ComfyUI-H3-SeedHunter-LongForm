@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import project_state
 
@@ -163,6 +164,54 @@ class ProjectStateTests(unittest.TestCase):
                 f"{data['project_id']}:1",
                 {"clip_seconds": 0},
             )
+
+    def test_assemble_active_timeline_uses_recorded_frame_overlaps(self):
+        data, directory = project_state.create_project(self.output, "Film One")
+        manifest_path = directory / "project.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        records = []
+        previous = ""
+        for index, overlap in ((1, 0), (2, 39), (3, 39)):
+            record_id = f"record-{index}"
+            video = directory / "clips" / f"clip_{index:05d}.mp4"
+            video.write_bytes(b"video")
+            records.append({
+                "record_id": record_id,
+                "parent_record_id": previous,
+                "index": index,
+                "take": 1,
+                "video": video.relative_to(directory).as_posix(),
+                "context": f"context/clip_{index:05d}.safetensors",
+                "prompt": f"prompts/clip_{index:05d}.txt",
+                "frame_count": 124,
+                "overlap_frames": overlap,
+                "fps": 24.0,
+            })
+            previous = record_id
+        manifest["accepted_clips"] = records
+        manifest["active_timeline"] = [item["record_id"] for item in records]
+        manifest["next_clip_index"] = 4
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        command = []
+
+        def fake_run(args, **kwargs):
+            command.extend(args)
+            Path(args[-1]).write_bytes(b"assembled")
+            return mock.Mock(returncode=0, stderr="", stdout="")
+
+        with mock.patch.object(project_state.shutil, "which", return_value="ffmpeg"), \
+                mock.patch.object(project_state.subprocess, "run", side_effect=fake_run):
+            snapshot = project_state.assemble_project(
+                self.output, "Film One", f"{data['project_id']}:1"
+            )
+
+        filter_graph = command[command.index("-filter_complex") + 1]
+        self.assertIn("N/38", filter_graph)
+        self.assertIn("concat=n=5:v=1:a=0", filter_graph)
+        self.assertEqual(snapshot["final_frame_count"], 294)
+        self.assertAlmostEqual(snapshot["final_duration"], 12.25)
+        self.assertEqual(snapshot["revision"], 2)
+        self.assertEqual(Path(snapshot["final_render"]).read_bytes(), b"assembled")
 
     def test_continuation_requires_overlap(self):
         data, _ = project_state.create_project(self.output, "Film One")

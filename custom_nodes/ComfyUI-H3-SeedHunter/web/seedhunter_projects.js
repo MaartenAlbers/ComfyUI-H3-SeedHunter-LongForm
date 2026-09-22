@@ -430,6 +430,24 @@ async function saveCurrentProjectState(node) {
     notify(`Saved workflow state for ${result.status}`);
 }
 
+async function assembleCurrentProject(node) {
+    const project = node.properties?.seedhunter_project;
+    if (!project?.project_token) throw new Error("Create or load a project first.");
+    notify("Assembling the active project timeline…");
+    const response = await fetch("/seedhunter/project/assemble", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            project_name: String(widget(node, "project_name")?.value || ""),
+            project_token: project.project_token,
+        }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not assemble the project timeline.");
+    applySnapshot(node, result);
+    notify(`Assembled ${result.final_frame_count} frames (${result.final_duration.toFixed(3)}s): ${result.final_render}`);
+}
+
 function installAcceptButton(node) {
     if (node.type !== "VHS_VideoCombine" || widget(node, "ACCEPT CURRENT CLIP INTO PROJECT")) return;
     const title = node.title || "";
@@ -466,6 +484,10 @@ function install(node) {
         try { await saveCurrentProjectState(node); }
         catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
+    node.addWidget("button", "ASSEMBLE ACTIVE TIMELINE", null, async () => {
+        try { await assembleCurrentProject(node); }
+        catch (error) { alert(`SeedHunter Project: ${error.message}`); }
+    });
     node.addWidget("button", "REFRESH PROJECT LIST", null, async () => {
         try {
             const projects = await refreshProjectSelector(node);
@@ -473,7 +495,7 @@ function install(node) {
         } catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 620);
-    node.size[1] = Math.max(Number(node.size?.[1] || 0), 340);
+    node.size[1] = Math.max(Number(node.size?.[1] || 0), 370);
 
     const saved = node.properties.seedhunter_project;
     if (saved?.status) applySnapshot(node, saved);

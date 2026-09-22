@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -393,6 +394,132 @@ def save_project_settings(output_directory, project_name, project_token, setting
     data["updated_at"] = _now()
     _write_json_atomic(directory / "project.json", data)
     return project_snapshot(output_directory, project_name)
+
+
+def _active_records(data):
+    records = {item["record_id"]: item for item in data["accepted_clips"]}
+    return [records[record_id] for record_id in data["active_timeline"]]
+
+
+def _inside(directory, relative):
+    candidate = (directory / str(relative)).resolve()
+    if directory not in candidate.parents:
+        raise ValueError("Manifest contains a path outside its project folder.")
+    return candidate
+
+
+def assemble_project(output_directory, project_name, project_token):
+    """Render the active timeline with frame-exact video and audio overlaps."""
+    data, directory = load_project(output_directory, project_name)
+    expected_token = f"{data['project_id']}:{data['revision']}"
+    if str(project_token) != expected_token:
+        raise ValueError("Project state changed. Reload it before assembling.")
+    records = _active_records(data)
+    if not records:
+        raise ValueError("Accept at least one clip before assembling the project.")
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise FileNotFoundError("FFmpeg was not found on PATH.")
+
+    paths = []
+    for record in records:
+        path = _inside(directory, record.get("video", ""))
+        if not path.is_file():
+            raise FileNotFoundError(f"Accepted clip is missing: {path.name}")
+        paths.append(path)
+
+    fps = float(records[0].get("fps", 24.0))
+    if fps <= 0 or any(abs(float(item.get("fps", fps)) - fps) > 0.001 for item in records):
+        raise ValueError("All active clips must use the same positive FPS.")
+    filters = []
+    video_parts = []
+    for index, record in enumerate(records):
+        frames = int(record.get("frame_count", 0))
+        incoming = int(record.get("overlap_frames", 0)) if index else 0
+        outgoing = int(records[index + 1].get("overlap_frames", 0)) if index + 1 < len(records) else 0
+        if frames < 1 or incoming < 0 or outgoing < 0 or incoming + outgoing >= frames:
+            raise ValueError("Timeline overlap metadata does not fit its clip frames.")
+        unique_end = frames - outgoing
+        if unique_end > incoming:
+            label = f"u{index}"
+            filters.append(
+                f"[{index}:v]trim=start_frame={incoming}:end_frame={unique_end},"
+                f"setpts=PTS-STARTPTS[{label}]"
+            )
+            video_parts.append(f"[{label}]")
+        if outgoing:
+            left = f"ol{index}"
+            right = f"ir{index + 1}"
+            blend = f"b{index}_{index + 1}"
+            filters.append(
+                f"[{index}:v]trim=start_frame={frames - outgoing}:end_frame={frames},"
+                f"setpts=PTS-STARTPTS[{left}]"
+            )
+            filters.append(
+                f"[{index + 1}:v]trim=start_frame=0:end_frame={outgoing},"
+                f"setpts=PTS-STARTPTS[{right}]"
+            )
+            expression = "B" if outgoing == 1 else f"A*(1-N/{outgoing - 1})+B*(N/{outgoing - 1})"
+            filters.append(
+                f"[{left}][{right}]blend=all_expr='{expression}':shortest=1,"
+                f"setpts=PTS-STARTPTS[{blend}]"
+            )
+            video_parts.append(f"[{blend}]")
+    filters.append("".join(video_parts) + f"concat=n={len(video_parts)}:v=1:a=0[v]")
+
+    for index in range(len(records)):
+        filters.append(
+            f"[{index}:a]aresample=32000,asetpts=PTS-STARTPTS[a{index}]"
+        )
+    audio_label = "a0"
+    for index in range(1, len(records)):
+        overlap = int(records[index].get("overlap_frames", 0))
+        duration = overlap / fps
+        next_label = f"ax{index}"
+        filters.append(
+            f"[{audio_label}][a{index}]acrossfade=d={duration:.12g}:"
+            f"c1=tri:c2=tri[{next_label}]"
+        )
+        audio_label = next_label
+    total_frames = sum(int(item["frame_count"]) for item in records) - sum(
+        int(item.get("overlap_frames", 0)) for item in records[1:]
+    )
+    total_seconds = total_frames / fps
+    filters.append(
+        f"[{audio_label}]apad=whole_dur={total_seconds:.12g},"
+        f"atrim=duration={total_seconds:.12g}[a]"
+    )
+
+    renders = directory / "renders"
+    renders.mkdir(parents=True, exist_ok=True)
+    destination = renders / f"{validate_project_name(project_name)}_timeline_r{data['revision']}.mp4"
+    temporary = destination.with_name(f".{destination.stem}.partial.mp4")
+    command = [ffmpeg, "-y", "-v", "warning"]
+    for path in paths:
+        command.extend(("-i", str(path)))
+    command.extend((
+        "-filter_complex", ";".join(filters), "-map", "[v]", "-map", "[a]",
+        "-r", f"{fps:.12g}", "-c:v", "libx264", "-preset", "medium",
+        "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a",
+        "192k", "-movflags", "+faststart", str(temporary),
+    ))
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        os.replace(temporary, destination)
+    except subprocess.CalledProcessError as exc:
+        temporary.unlink(missing_ok=True)
+        detail = (exc.stderr or exc.stdout or "FFmpeg failed.").strip().splitlines()[-1]
+        raise OSError(f"Project assembly failed: {detail}") from exc
+
+    data["final_render"] = destination.relative_to(directory).as_posix()
+    data["revision"] = int(data["revision"]) + 1
+    data["updated_at"] = _now()
+    _write_json_atomic(directory / "project.json", data)
+    snapshot = project_snapshot(output_directory, project_name)
+    snapshot["final_render"] = str(destination.resolve())
+    snapshot["final_frame_count"] = total_frames
+    snapshot["final_duration"] = total_seconds
+    return snapshot
 
 
 def accept_clip(

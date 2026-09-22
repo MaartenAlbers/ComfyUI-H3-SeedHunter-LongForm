@@ -126,6 +126,18 @@ async function sendToAudioReference(outputNode) {
 
 function installButtons(node) {
     if (node.type !== "VHS_VideoCombine") return;
+    const projectMode = app.graph?._nodes?.some((item) => item.type === "H3SeedHunterProject");
+    if (projectMode) {
+        for (const name of ["USE AS SOURCE FOR NEXT CLIP", "USE AS AUDIO REFERENCE"]) {
+            const item = widget(node, name);
+            if (item) {
+                item.type = "hidden";
+                item.computeSize = () => [0, -4];
+            }
+        }
+        node.setDirtyCanvas?.(true, true);
+        return;
+    }
     const title = node.title || "";
     const isSinglePassOutput = Number(node.id) === 2296 || title.includes("HYBRID PREVIEW 1");
     if (isSinglePassOutput && !widget(node, "USE AS SOURCE FOR NEXT CLIP")) {
