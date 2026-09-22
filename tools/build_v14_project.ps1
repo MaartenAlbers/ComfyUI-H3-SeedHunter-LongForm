@@ -105,6 +105,7 @@ $project.outputs[5].links = @($sourceVideoLink)
 $project.outputs[6].links = @($contextPathLink)
 
 $workflow.nodes = @($workflow.nodes) + $contextLoader
+$workflow.nodes = @($workflow.nodes | Where-Object { [int]$_.id -ne 2642 })
 $workflow.links = @($workflow.links) +
     ,@($contextPathLink, $nodeId, 6, $contextNodeId, 0, 'STRING') +
     ,@($projectTokenLink, $nodeId, 3, $contextNodeId, 1, 'STRING') +

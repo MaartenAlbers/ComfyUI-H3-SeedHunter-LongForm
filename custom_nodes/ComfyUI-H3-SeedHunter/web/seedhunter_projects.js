@@ -146,15 +146,17 @@ function applySnapshot(node, snapshot) {
     const clipNumber = findNode((item) =>
         (item.title || "").includes("NEXT CLIP NUMBER")
     );
-    if (!clipNumber) throw new Error("NEXT CLIP NUMBER controller was not found.");
-    const clipWidget = widget(clipNumber, "value") || clipNumber.widgets?.[0];
-    if (!clipWidget) throw new Error("NEXT CLIP NUMBER value widget was not found.");
-    clipWidget.value = Number(snapshot.next_clip_index);
-    clipWidget.callback?.(
-        clipWidget.value, app.canvas, clipNumber, app.canvas?.graph_mouse, {}
-    );
-    clipWidget.value = Number(snapshot.next_clip_index);
-    clipNumber.setDirtyCanvas?.(true, true);
+    if (clipNumber) {
+        const clipWidget = widget(clipNumber, "value") || clipNumber.widgets?.[0];
+        if (clipWidget) {
+            clipWidget.value = Number(snapshot.next_clip_index);
+            clipWidget.callback?.(
+                clipWidget.value, app.canvas, clipNumber, app.canvas?.graph_mouse, {}
+            );
+            clipWidget.value = Number(snapshot.next_clip_index);
+            clipNumber.setDirtyCanvas?.(true, true);
+        }
+    }
 
     const source = findNode((item) =>
         item.type === "H3SeedHunterSourceVideo" || item.type === "H3SeedHunterSourceVideoFFmpeg"
@@ -241,7 +243,7 @@ async function acceptRenderedClip(outputNode) {
     if (!contextSave) throw new Error("The matching context-save node was not found.");
 
     const output = await resolvedOutput(outputNode);
-    const clipIndex = Number(valueOfNode("PrimitiveInt", "NEXT CLIP NUMBER", "value"));
+    const clipIndex = Number(project.next_clip_index);
     const seconds = Number(valueOfNode("PrimitiveFloat", "Number of seconds clip", "value"));
     const contextLength = Number(valueOfNode("H3SeedHunterAVContext", "PREVIEW", "context_length") || 39);
     const prompt = String(valueOfNode("MiniMaxH3ReferenceToVideo", "ROLLING CLIP", "prompt") || "");
