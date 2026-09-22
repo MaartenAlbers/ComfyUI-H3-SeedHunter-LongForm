@@ -355,6 +355,46 @@ class H3SeedHunterAssemble:
         return (result, output)
 
 
+class H3SeedHunterLazyPreviewSelect:
+    """Request only the selected preview latent from ComfyUI's executor."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "input1": ("LATENT", {"lazy": True}),
+            "select": ("INT", {"forceInput": True}),
+            # Kept for slot-compatible migration from the old ImpactSwitch.
+            "sel_mode": ("BOOLEAN", {"default": False}),
+            "input2": ("LATENT", {"lazy": True}),
+            "input3": ("LATENT", {"lazy": True}),
+        }}
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("selected_value",)
+    FUNCTION = "select_preview"
+    CATEGORY = "conditioning/minimax/seedhunter"
+
+    @staticmethod
+    def _selected_name(select):
+        index = int(select)
+        if index not in (1, 2, 3):
+            raise ValueError("Selected preview must be 1, 2, or 3.")
+        return f"input{index}"
+
+    def check_lazy_status(self, input1=None, select=1, sel_mode=False,
+                          input2=None, input3=None):
+        name = self._selected_name(select)
+        return [] if locals()[name] is not None else [name]
+
+    def select_preview(self, input1=None, select=1, sel_mode=False,
+                       input2=None, input3=None):
+        name = self._selected_name(select)
+        value = locals()[name]
+        if value is None:
+            raise ValueError(f"Preview {select} latent was not evaluated.")
+        return (value,)
+
+
 class H3SeedHunterSinglePassControl:
     """UI preset controller; its browser extension switches the workflow routes."""
 
@@ -486,6 +526,7 @@ class H3SeedHunterAcceptClip:
 NODE_CLASS_MAPPINGS = {cls.__name__: cls for cls in (
     H3SeedHunterAudioInput, H3SeedHunterAudioRouter, H3SeedHunterSourceVideo, H3SeedHunterAVContext,
     H3SeedHunterRefineContext, H3SeedHunterOutputAudio, H3SeedHunterAssemble,
+    H3SeedHunterLazyPreviewSelect,
     H3SeedHunterSinglePassControl, H3SeedHunterProject, H3SeedHunterAcceptClip,
     H3SeedHunterProjectContext, H3SeedHunterProjectClipIndex,
 )}
@@ -497,6 +538,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterRefineContext": "H3 SeedHunter Final Context + Keep Selected Audio",
     "H3SeedHunterOutputAudio": "H3 SeedHunter Output Audio",
     "H3SeedHunterAssemble": "H3 SeedHunter Seamless Assembly",
+    "H3SeedHunterLazyPreviewSelect": "H3 SeedHunter Lazy Preview Selector",
     "H3SeedHunterSinglePassControl": "H3 SeedHunter Single Pass Control",
     "H3SeedHunterProject": "H3 SeedHunter Long-Form Project",
     "H3SeedHunterAcceptClip": "H3 SeedHunter Accept Clip Into Project",

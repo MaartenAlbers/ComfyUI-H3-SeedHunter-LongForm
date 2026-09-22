@@ -4,6 +4,20 @@ $source = Join-Path $root 'H3_SeedHunter_Long_Form_Video_v1.3.1.json'
 $target = Join-Path $root 'H3_SeedHunter_Long_Form_Video_v1.4_DEV.json'
 $workflow = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json
 
+# ImpactSwitch eagerly evaluates all three preview latents. The SeedHunter
+# selector uses ComfyUI lazy inputs, so only the chosen preview branch runs
+# when the final pass is queued. Its slot order intentionally matches the old
+# node and preserves all existing links.
+$previewSelector = $workflow.nodes | Where-Object { $_.title -eq 'Selected preview latent' }
+if (-not $previewSelector) { throw 'The source workflow is missing its preview selector.' }
+$previewSelector.type = 'H3SeedHunterLazyPreviewSelect'
+$previewSelector.properties.'Node name for S&R' = 'H3SeedHunterLazyPreviewSelect'
+$previewSelector.outputs = @(
+    [pscustomobject]@{
+        localized_name='selected_value'; name='selected_value'; type='LATENT'; links=@(1631)
+    }
+)
+
 # Project mode owns these transient staging paths. They are hidden and locked
 # by the frontend as well, so accepted project assets cannot be orphaned by an
 # edited filename prefix.
