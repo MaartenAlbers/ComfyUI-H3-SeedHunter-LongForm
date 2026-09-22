@@ -16,6 +16,7 @@ const ASPECT_RATIOS = {
     "16:9 (Widescreen)": [16, 9],
     "21:9 (Ultrawide)": [21, 9],
 };
+const LEGACY_UI_WIDGETS = new Set(["CURRENT MODE", "TURN ON SINGLE PASS", "RESTORE PREVIEW MODE"]);
 
 const widget = (node, name) => node?.widgets?.find((item) => item.name === name);
 const findNode = (part) => (app.graph?._nodes || []).find((node) => (node.title || "").includes(part));
@@ -105,7 +106,9 @@ function setResolution(control, value) {
     }
     field.value = Number(value);
     field.callback?.(field.value, app.canvas, node, app.canvas?.graph_mouse, {});
-    node.title = `GENERATION FORMAT — ${aspect.split(" ")[0]} / CURRENT ${Number(value)} MP`;
+    node.title = "INTERNAL — generation dimensions (managed by FORMAT)";
+    node.flags ||= {};
+    node.flags.collapsed = true;
     node.setDirtyCanvas?.(true, true);
 }
 
@@ -154,18 +157,50 @@ function bindFormatWidgets(control) {
 function setStatus(control, mode) {
     control.properties ||= {};
     control.properties.seedhunter_mode = mode;
-    const status = widget(control, "CURRENT MODE");
     const label = mode === "single" ? "SINGLE PASS" : "PREVIEW";
     const mp = Number(widget(control, mode === "single" ? "single_pass_megapixels" : "preview_megapixels")?.value);
     const aspect = aspectRatio(control).split(" ")[0];
     const finalMp = Number(widget(control, "final_pass_megapixels")?.value || 1.5);
-    if (status) status.value = `${aspect} · ${label} ${mp} MP · FINAL ${finalMp} MP`;
     control.title = `FORMAT: ${aspect} — ${label} ${mp} MP — FINAL ${finalMp} MP`;
     control.color = mode === "single" ? "#c16d18" : "#7f9431";
     control.bgcolor = mode === "single" ? "#3d2715" : "#343b22";
     control.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
     window.dispatchEvent(new CustomEvent("seedhunter-mode-changed", {detail: {mode}}));
+}
+
+function normalizeFormatWidgets(control) {
+    const resolution = (app.graph?._nodes || []).find((item) => item.type === "ResolutionSelector");
+    const resolutionAspect = String(widget(resolution, "aspect_ratio")?.value || "");
+    const aspectField = widget(control, "aspect_ratio");
+    if (aspectField && !ASPECT_RATIOS[String(aspectField.value)]) {
+        aspectField.value = ASPECT_RATIOS[resolutionAspect] ? resolutionAspect : "16:9 (Widescreen)";
+    }
+    const finalField = widget(control, "final_pass_megapixels");
+    const finalValue = Number(finalField?.value);
+    if (finalField && (!Number.isFinite(finalValue) || finalValue <= 0)) finalField.value = 1.5;
+}
+
+function installButtons(node) {
+    // v1.3 saved frontend-only status/buttons positionally. Remove those legacy
+    // widgets so they cannot be mistaken for the new aspect/final inputs.
+    node.widgets = (node.widgets || []).filter((item) => !LEGACY_UI_WIDGETS.has(item.name));
+    const singleButton = node.addWidget("button", "TURN ON SINGLE PASS", null, () => {
+        try { enableSinglePass(node); } catch (error) { alert(`SeedHunter: ${error.message}`); }
+    }, {serialize: false});
+    const previewButton = node.addWidget("button", "RESTORE PREVIEW MODE", null, () => {
+        try { restorePreview(node); } catch (error) { alert(`SeedHunter: ${error.message}`); }
+    }, {serialize: false});
+    singleButton.serializeValue = () => undefined;
+    previewButton.serializeValue = () => undefined;
+}
+
+function collapseResolutionHelper(node) {
+    if (node.type !== "ResolutionSelector") return;
+    node.title = "INTERNAL — generation dimensions (managed by FORMAT)";
+    node.flags ||= {};
+    node.flags.collapsed = true;
+    node.setDirtyCanvas?.(true, true);
 }
 
 function enableSinglePass(control) {
@@ -224,34 +259,24 @@ function restorePreview(control) {
 
 function install(node) {
     if (node.type !== TYPE) return;
-    if (widget(node, "TURN ON SINGLE PASS")) {
-        bindResolutionWidget(node, "preview_megapixels", "preview");
-        bindResolutionWidget(node, "single_pass_megapixels", "single");
-        bindFormatWidgets(node);
-        return;
-    }
     node.properties ||= {};
     node.properties.seedhunter_mode ||= "preview";
-    const status = node.addWidget("text", "CURRENT MODE", "PREVIEW", () => {}, {serialize: false});
-    node.addWidget("button", "TURN ON SINGLE PASS", null, () => {
-        try { enableSinglePass(node); } catch (error) { alert(`SeedHunter: ${error.message}`); }
-    });
-    node.addWidget("button", "RESTORE PREVIEW MODE", null, () => {
-        try { restorePreview(node); } catch (error) { alert(`SeedHunter: ${error.message}`); }
-    });
+    normalizeFormatWidgets(node);
+    installButtons(node);
     bindResolutionWidget(node, "preview_megapixels", "preview");
     bindResolutionWidget(node, "single_pass_megapixels", "single");
     bindFormatWidgets(node);
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 430);
-    node.size[1] = Math.max(Number(node.size?.[1] || 0), 240);
+    node.size[1] = Math.max(Number(node.size?.[1] || 0), 210);
     setStatus(node, node.properties.seedhunter_mode === "single" ? "single" : "preview");
 }
 
 app.registerExtension({
     name: "SeedHunter.SinglePassControls",
-    async nodeCreated(node) { install(node); },
-    async loadedGraphNode(node) { install(node); },
+    async nodeCreated(node) { collapseResolutionHelper(node); install(node); },
+    async loadedGraphNode(node) { collapseResolutionHelper(node); install(node); },
     async afterConfigureGraph() {
+        for (const node of app.graph?._nodes || []) collapseResolutionHelper(node);
         for (const node of app.graph?._nodes || []) install(node);
         for (const node of app.graph?._nodes || []) {
             if (node.type === TYPE) {
