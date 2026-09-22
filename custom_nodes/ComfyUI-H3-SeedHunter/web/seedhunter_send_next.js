@@ -59,6 +59,9 @@ function singlePassIsActive() {
 }
 
 async function sendToNextClip(outputNode) {
+    if (app.graph?._nodes?.some((node) => node.type === "H3SeedHunterProject")) {
+        throw new Error("Project State is active. Use ACCEPT CURRENT CLIP INTO PROJECT so the MP4, safetensor and manifest advance together.");
+    }
     const output = await resolvedOutput(outputNode);
     if (!output) throw new Error("Render and save this video first.");
     const source = app.graph?._nodes?.find((node) =>

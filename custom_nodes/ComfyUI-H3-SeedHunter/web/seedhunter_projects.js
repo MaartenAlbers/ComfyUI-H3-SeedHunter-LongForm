@@ -11,6 +11,10 @@ function setWidget(node, name, value) {
     if (!item) return;
     item.value = value;
     item.callback?.(value, app.canvas, node, app.canvas?.graph_mouse, {});
+    // Some primitive widgets rebuild their displayed value in the callback.
+    // Assign once more so the authoritative project state wins visibly too.
+    item.value = value;
+    node.setDirtyCanvas?.(true, true);
 }
 
 function findNode(predicate) {
@@ -85,9 +89,17 @@ function applySnapshot(node, snapshot) {
     node.bgcolor = "#203b3c";
 
     const clipNumber = findNode((item) =>
-        item.type === "PrimitiveInt" && (item.title || "").includes("NEXT CLIP NUMBER")
+        (item.title || "").includes("NEXT CLIP NUMBER")
     );
-    setWidget(clipNumber, "value", Number(snapshot.next_clip_index));
+    if (!clipNumber) throw new Error("NEXT CLIP NUMBER controller was not found.");
+    const clipWidget = widget(clipNumber, "value") || clipNumber.widgets?.[0];
+    if (!clipWidget) throw new Error("NEXT CLIP NUMBER value widget was not found.");
+    clipWidget.value = Number(snapshot.next_clip_index);
+    clipWidget.callback?.(
+        clipWidget.value, app.canvas, clipNumber, app.canvas?.graph_mouse, {}
+    );
+    clipWidget.value = Number(snapshot.next_clip_index);
+    clipNumber.setDirtyCanvas?.(true, true);
 
     const source = findNode((item) =>
         item.type === "H3SeedHunterSourceVideo" || item.type === "H3SeedHunterSourceVideoFFmpeg"
