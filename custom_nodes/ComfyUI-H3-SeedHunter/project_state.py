@@ -100,11 +100,17 @@ def create_project(output_directory, project_name):
             "master_audio": "",
             "fps": 24.0,
             "context_frames": 39,
+            "export": {
+                "mode": "delivery_mp4",
+                "filename": "",
+                "crf": 18,
+            },
         },
         "next_clip_index": 1,
         "accepted_clips": [],
         "active_timeline": [],
         "final_render": "",
+        "preview_render": "",
     }
     _write_json_atomic(path, data)
     return data, directory
@@ -240,6 +246,8 @@ def project_snapshot(output_directory, project_name):
         "previous_context_latent": absolute(latest.get("context", "")),
         "master_audio": absolute(settings.get("master_audio", "")),
         "final_render": absolute(data.get("final_render", "")),
+        "preview_render": absolute(data.get("preview_render", "")),
+        "export_settings": dict(settings.get("export", {})),
         "workflow_settings": dict(settings.get("workflow", {})),
         "prompt": prompt,
         "reference_images": list(latest.get("reference_images", [])),
@@ -421,7 +429,27 @@ def _inside(directory, relative):
     return candidate
 
 
-def assemble_project(output_directory, project_name, project_token):
+def _clean_export_settings(settings):
+    settings = settings or {}
+    if not isinstance(settings, dict):
+        raise ValueError("Export settings must be a JSON object.")
+    mode = str(settings.get("mode", "delivery_mp4"))
+    if mode not in ("delivery_mp4", "master_prores"):
+        raise ValueError("Unknown timeline export mode.")
+    filename = str(settings.get("filename", "")).strip()
+    if filename:
+        if "/" in filename or "\\" in filename:
+            raise ValueError("Export filename cannot contain a folder path.")
+        filename = Path(filename).stem
+        if not _SAFE_NAME.fullmatch(filename) or filename in (".", ".."):
+            raise ValueError("Export filename contains unsupported characters.")
+    crf = int(settings.get("crf", 18))
+    if not 0 <= crf <= 30:
+        raise ValueError("Delivery CRF must be between 0 and 30.")
+    return {"mode": mode, "filename": filename, "crf": crf}
+
+
+def assemble_project(output_directory, project_name, project_token, export_settings=None):
     """Render the active timeline with frame-exact video and audio overlaps."""
     data, directory = load_project(output_directory, project_name)
     expected_token = f"{data['project_id']}:{data['revision']}"
@@ -501,31 +529,56 @@ def assemble_project(output_directory, project_name, project_token):
 
     renders = directory / "renders"
     renders.mkdir(parents=True, exist_ok=True)
-    destination = renders / f"{validate_project_name(project_name)}_timeline_r{data['revision']}.mp4"
-    temporary = destination.with_name(f".{destination.stem}.partial.mp4")
+    export = _clean_export_settings(export_settings or data.get("settings", {}).get("export", {}))
+    stem = export["filename"] or f"{validate_project_name(project_name)}_timeline_r{data['revision']}"
+    master = export["mode"] == "master_prores"
+    destination = renders / f"{stem}{'.mov' if master else '.mp4'}"
+    temporary = destination.with_name(f".{destination.stem}.partial{destination.suffix}")
+    preview = renders / f"{stem}_preview.mp4" if master else destination
+    preview_temporary = preview.with_name(f".{preview.stem}.partial.mp4") if master else temporary
     command = [ffmpeg, "-y", "-v", "warning"]
     for path in paths:
         command.extend(("-i", str(path)))
-    command.extend((
-        "-filter_complex", ";".join(filters), "-map", "[v]", "-map", "[a]",
-        "-r", f"{fps:.12g}", "-c:v", "libx264", "-preset", "medium",
-        "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a",
-        "192k", "-movflags", "+faststart", str(temporary),
-    ))
+    command.extend(("-filter_complex", ";".join(filters), "-map", "[v]", "-map", "[a]", "-r", f"{fps:.12g}"))
+    if master:
+        command.extend((
+            "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le",
+            "-c:a", "pcm_s24le", str(temporary),
+        ))
+    else:
+        command.extend((
+            "-c:v", "libx264", "-preset", "medium", "-crf", str(export["crf"]),
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart", str(temporary),
+        ))
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
         os.replace(temporary, destination)
+        if master:
+            proxy_command = [
+                ffmpeg, "-y", "-v", "warning", "-i", str(destination),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                "-movflags", "+faststart", str(preview_temporary),
+            ]
+            subprocess.run(proxy_command, check=True, capture_output=True, text=True)
+            os.replace(preview_temporary, preview)
     except subprocess.CalledProcessError as exc:
         temporary.unlink(missing_ok=True)
+        if master:
+            preview_temporary.unlink(missing_ok=True)
         detail = (exc.stderr or exc.stdout or "FFmpeg failed.").strip().splitlines()[-1]
         raise OSError(f"Project assembly failed: {detail}") from exc
 
     data["final_render"] = destination.relative_to(directory).as_posix()
+    data["preview_render"] = preview.relative_to(directory).as_posix()
+    data.setdefault("settings", {})["export"] = export
     data["revision"] = int(data["revision"]) + 1
     data["updated_at"] = _now()
     _write_json_atomic(directory / "project.json", data)
     snapshot = project_snapshot(output_directory, project_name)
     snapshot["final_render"] = str(destination.resolve())
+    snapshot["preview_render"] = str(preview.resolve())
     snapshot["final_frame_count"] = total_frames
     snapshot["final_duration"] = total_seconds
     return snapshot

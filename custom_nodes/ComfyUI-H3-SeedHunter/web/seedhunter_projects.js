@@ -3,6 +3,10 @@ import { app } from "/scripts/app.js";
 const TYPE = "H3SeedHunterProject";
 const SINGLE_PASS_CONTEXT_PREFIX = "h3_resume/seedhunter_v14/single/clip";
 const FINAL_PASS_CONTEXT_PREFIX = "h3_resume/seedhunter_v14/final/clip";
+const EXPORT_MODES = {
+    "Delivery MP4 — H.264": "delivery_mp4",
+    "Master MOV — ProRes 422 HQ": "master_prores",
+};
 
 function widget(node, name) {
     return node?.widgets?.find((item) => item.name === name);
@@ -50,8 +54,65 @@ function timelinePreviewHost(projectNode) {
         item.properties?.seedhunter_timeline_preview) || projectNode;
 }
 
+function exportSettings(projectNode) {
+    const host = timelinePreviewHost(projectNode);
+    const label = String(widget(host, "export_mode")?.value || Object.keys(EXPORT_MODES)[0]);
+    return {
+        mode: EXPORT_MODES[label] || "delivery_mp4",
+        filename: String(widget(host, "filename")?.value || "").trim(),
+        crf: Number(widget(host, "delivery_crf")?.value ?? 18),
+    };
+}
+
+function refreshExportWidgets(host) {
+    const master = EXPORT_MODES[String(widget(host, "export_mode")?.value)] === "master_prores";
+    const crf = widget(host, "delivery_crf");
+    if (crf) {
+        crf.disabled = master;
+        crf.options ||= {};
+        crf.options.disabled = master;
+    }
+    host.setDirtyCanvas?.(true, true);
+}
+
+function installTimelineExport(projectNode) {
+    const host = timelinePreviewHost(projectNode);
+    if (!host || host === projectNode || typeof host.addWidget !== "function") return host;
+    const keep = new Set(["export_mode", "filename", "delivery_crf", "ASSEMBLE / RE-ASSEMBLE ACTIVE TIMELINE"]);
+    for (const item of host.widgets || []) {
+        if (keep.has(item.name) || item.name === "ASSEMBLED TIMELINE PREVIEW") continue;
+        item.type = "hidden";
+        item.computeSize = () => [0, -4];
+    }
+    if (!widget(host, "export_mode")) {
+        host.addWidget("combo", "export_mode", Object.keys(EXPORT_MODES)[0], () => refreshExportWidgets(host), {
+            values: Object.keys(EXPORT_MODES), serialize: false,
+        });
+        host.addWidget("text", "filename", "", null, {serialize: false});
+        host.addWidget("number", "delivery_crf", 18, null, {
+            min: 0, max: 30, step: 1, precision: 0, serialize: false,
+        });
+        host.addWidget("button", "ASSEMBLE / RE-ASSEMBLE ACTIVE TIMELINE", null, async () => {
+            try { await assembleCurrentProject(projectNode); }
+            catch (error) { alert(`SeedHunter Project: ${error.message}`); }
+        }, {serialize: false});
+    }
+    refreshExportWidgets(host);
+    return host;
+}
+
+function applyExportSettings(projectNode, settings) {
+    const host = installTimelineExport(projectNode);
+    if (!host || !settings) return;
+    const label = Object.entries(EXPORT_MODES).find(([, value]) => value === settings.mode)?.[0];
+    if (label) setWidget(host, "export_mode", label);
+    if (settings.filename !== undefined) setWidget(host, "filename", String(settings.filename));
+    if (settings.crf !== undefined) setWidget(host, "delivery_crf", Number(settings.crf));
+    refreshExportWidgets(host);
+}
+
 function ensureTimelinePreview(projectNode) {
-    const node = timelinePreviewHost(projectNode);
+    const node = installTimelineExport(projectNode) || timelinePreviewHost(projectNode);
     node.properties ||= {};
     node.properties.seedhunter_timeline_preview = true;
     if (node.seedhunterTimelineVideoElement) return node.seedhunterTimelineVideoElement;
@@ -336,6 +397,7 @@ function applySnapshot(node, snapshot) {
     updateClipDisplay(snapshot);
     updateContinuationSelector(node, snapshot);
     applyProjectSettings(snapshot);
+    applyExportSettings(node, snapshot.export_settings);
 
     const status = widget(node, "PROJECT STATUS");
     if (status) status.value = snapshot.status;
@@ -557,6 +619,7 @@ async function assembleCurrentProject(node) {
         body: JSON.stringify({
             project_name: String(widget(node, "project_name")?.value || ""),
             project_token: project.project_token,
+            export: exportSettings(node),
         }),
     });
     const result = await response.json();
@@ -620,16 +683,13 @@ function install(node) {
         try { await saveCurrentProjectState(node); }
         catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
-    node.addWidget("button", "ASSEMBLE ACTIVE TIMELINE", null, async () => {
-        try { await assembleCurrentProject(node); }
-        catch (error) { alert(`SeedHunter Project: ${error.message}`); }
-    });
     node.addWidget("button", "REFRESH PROJECT LIST", null, async () => {
         try {
             const projects = await refreshProjectSelector(node);
             notify(`Found ${projects.length} project(s).`);
         } catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
+    installTimelineExport(node);
     ensureTimelinePreview(node);
     disableLegacyAssembly();
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 620);

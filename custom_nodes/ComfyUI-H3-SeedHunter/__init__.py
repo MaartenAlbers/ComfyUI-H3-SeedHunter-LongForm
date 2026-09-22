@@ -146,6 +146,7 @@ async def assemble_seedhunter_project(request):
             folder_paths.get_output_directory(),
             str(data.get("project_name", "")),
             str(data.get("project_token", "")),
+            data.get("export", {}),
         )
         return web.json_response(snapshot)
     except FileNotFoundError as exc:
@@ -184,7 +185,7 @@ async def seedhunter_project_final_video(request):
     try:
         name = str(request.query.get("project_name", ""))
         snapshot = project_snapshot(folder_paths.get_output_directory(), name)
-        video = snapshot.get("final_render", "")
+        video = snapshot.get("preview_render", "") or snapshot.get("final_render", "")
         if not video or not os.path.isfile(video):
             return web.json_response({"error": "Project has no assembled timeline yet."}, status=404)
         return web.FileResponse(video, headers={"Cache-Control": "no-store"})

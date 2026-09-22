@@ -217,6 +217,52 @@ class ProjectStateTests(unittest.TestCase):
         self.assertAlmostEqual(snapshot["final_duration"], 12.25)
         self.assertEqual(snapshot["revision"], 2)
         self.assertEqual(Path(snapshot["final_render"]).read_bytes(), b"assembled")
+        self.assertEqual(snapshot["preview_render"], snapshot["final_render"])
+        self.assertIn("libx264", command)
+        self.assertEqual(command[command.index("-crf") + 1], "18")
+
+    def test_master_export_uses_prores_pcm_and_creates_preview_proxy(self):
+        data, directory = project_state.create_project(self.output, "Film One")
+        manifest_path = directory / "project.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        video = directory / "clips" / "clip_00001.mp4"
+        video.write_bytes(b"video")
+        manifest["accepted_clips"] = [{
+            "record_id": "record-1", "parent_record_id": "", "index": 1,
+            "take": 1, "video": "clips/clip_00001.mp4",
+            "context": "context/clip_00001.safetensors",
+            "prompt": "prompts/clip_00001.txt", "frame_count": 124,
+            "overlap_frames": 0, "fps": 24.0,
+        }]
+        manifest["active_timeline"] = ["record-1"]
+        manifest["next_clip_index"] = 2
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        commands = []
+
+        def fake_run(args, **kwargs):
+            commands.append(list(args))
+            Path(args[-1]).write_bytes(b"render")
+            return mock.Mock(returncode=0, stderr="", stdout="")
+
+        with mock.patch.object(project_state.shutil, "which", return_value="ffmpeg"), \
+                mock.patch.object(project_state.subprocess, "run", side_effect=fake_run):
+            snapshot = project_state.assemble_project(
+                self.output, "Film One", f"{data['project_id']}:1",
+                {"mode": "master_prores", "filename": "My Master", "crf": 18},
+            )
+
+        self.assertEqual(len(commands), 2)
+        self.assertIn("prores_ks", commands[0])
+        self.assertIn("pcm_s24le", commands[0])
+        self.assertIn("libx264", commands[1])
+        self.assertTrue(snapshot["final_render"].endswith("My Master.mov"))
+        self.assertTrue(snapshot["preview_render"].endswith("My Master_preview.mp4"))
+        self.assertEqual(snapshot["export_settings"]["mode"], "master_prores")
+
+    def test_export_settings_reject_paths_and_unknown_modes(self):
+        for settings in ({"mode": "unknown"}, {"filename": "../escape"}):
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                project_state._clean_export_settings(settings)
 
     def test_continuation_requires_overlap(self):
         data, _ = project_state.create_project(self.output, "Film One")
