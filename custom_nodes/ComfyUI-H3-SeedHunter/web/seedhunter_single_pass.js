@@ -94,7 +94,7 @@ function setFinalResolution(control) {
 }
 
 function setResolution(control, value) {
-    const node = findNode("PREVIEW RESOLUTION");
+    const node = (app.graph?._nodes || []).find((item) => item.type === "ResolutionSelector");
     const field = widget(node, "megapixels");
     if (!node || !field) throw new Error("PREVIEW RESOLUTION was not found.");
     const aspect = aspectRatio(control);
