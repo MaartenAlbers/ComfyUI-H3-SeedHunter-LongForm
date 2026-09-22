@@ -384,6 +384,9 @@ async function acceptRenderedClip(outputNode) {
     if (singlePassOutput && !singlePassIsActive()) {
         throw new Error("Preview 1 can only be accepted while Single Pass Mode is active.");
     }
+    if (!singlePassOutput && singlePassIsActive()) {
+        throw new Error("Final Selected Clip can only be accepted while Preview Mode is active.");
+    }
     const contextSave = findNode((item) => item.type === "MiniMaxH3MotionContextSaveLatent" && (
         singlePassOutput
             ? (item.title || "").includes("SAVE SINGLE PASS CONTEXT")
@@ -481,6 +484,24 @@ function installAcceptButton(node) {
         try { await acceptRenderedClip(node); }
         catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
+    refreshAcceptButtonState();
+}
+
+function refreshAcceptButtonState() {
+    const single = singlePassIsActive();
+    for (const node of app.graph?._nodes || []) {
+        if (node.type !== "VHS_VideoCombine") continue;
+        const button = widget(node, "ACCEPT CURRENT CLIP INTO PROJECT");
+        if (!button) continue;
+        const isSinglePassOutput = (node.title || "").includes("HYBRID PREVIEW 1");
+        const isFinalOutput = (node.title || "").includes("FINAL SELECTED CLIP");
+        const disabled = (isSinglePassOutput && !single) || (isFinalOutput && single);
+        button.disabled = disabled;
+        button.options ||= {};
+        button.options.disabled = disabled;
+        node.setDirtyCanvas?.(true, true);
+    }
+    app.graph?.setDirtyCanvas?.(true, true);
 }
 
 function install(node) {
@@ -537,5 +558,11 @@ app.registerExtension({
             installAcceptButton(node);
         }
         lockProjectContextPrefixes();
+        refreshAcceptButtonState();
     },
 });
+
+if (!window.seedhunterAcceptModeListenerInstalled) {
+    window.seedhunterAcceptModeListenerInstalled = true;
+    window.addEventListener("seedhunter-mode-changed", refreshAcceptButtonState);
+}

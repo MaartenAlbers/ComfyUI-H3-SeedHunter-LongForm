@@ -97,6 +97,7 @@ function setStatus(control, mode) {
     control.bgcolor = mode === "single" ? "#3d2715" : "#343b22";
     control.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
+    window.dispatchEvent(new CustomEvent("seedhunter-mode-changed", {detail: {mode}}));
 }
 
 function enableSinglePass(control) {
