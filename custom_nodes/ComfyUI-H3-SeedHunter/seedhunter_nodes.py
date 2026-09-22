@@ -146,7 +146,8 @@ class H3SeedHunterAVContext:
             "clip_start_seconds": ("FLOAT", {"default": 0.0, "min": 0.0, "step": 0.001}),
             "context_length": ("INT", {"default": 39, "min": 39, "step": 51}),
         }, "optional": {
-            "master_audio": ("AUDIO",), "source_frames": ("IMAGE",), "source_audio": ("AUDIO",),
+            "master_audio": ("AUDIO",), "source_frames": ("IMAGE",),
+            "source_audio": ("AUDIO",), "context_latent": ("LATENT",),
         }}
 
     RETURN_TYPES = ("LATENT", "INT", "AUDIO")
@@ -155,7 +156,8 @@ class H3SeedHunterAVContext:
     CATEGORY = "conditioning/minimax/seedhunter"
 
     def prepare(self, latent, vae, audio_vae, audio_mode, clip_start_seconds=0.0,
-                context_length=39, master_audio=None, source_frames=None, source_audio=None):
+                context_length=39, master_audio=None, source_frames=None,
+                source_audio=None, context_latent=None):
         n = 0
         if source_frames is not None:
             video, _ = _h3("existing_video_extension")._streams_from_latent(latent)
@@ -177,7 +179,60 @@ class H3SeedHunterAVContext:
         out, overlap, _, _ = _h3("existing_video_extension").MiniMaxH3ExistingVideoMaskedContext().prepare(
             latent, vae, audio_vae, source_frames, source_audio, 24.0,
             n, "disabled", audio_feather_ticks=0)
+        if context_latent is not None and audio_mode in ("audio reference", "generate audio"):
+            # Keep the visual prefix encoded from the accepted MP4, but replace
+            # the audio prefix with the previous sampler's original H3 latent.
+            # This avoids a lossy MP4 decode -> audio VAE encode round trip.
+            target_video, target_audio = _h3("existing_video_extension")._streams_from_latent(out)
+            _, previous_audio = _h3("existing_video_extension")._streams_from_latent(context_latent)
+            audio_steps = int(round(int(overlap) / 24.0 * 40.0))
+            if audio_steps < 1 or audio_steps >= int(target_audio.shape[-1]):
+                raise ValueError("Saved audio context does not fit the continuation target.")
+            if int(previous_audio.shape[-1]) < audio_steps:
+                raise ValueError("Saved context latent has too little audio for this overlap.")
+            if tuple(previous_audio.shape[1:3]) != tuple(target_audio.shape[1:3]):
+                raise ValueError(
+                    "Saved and target H3 audio latent geometry do not match."
+                )
+            target_audio = target_audio.clone()
+            target_audio[..., :audio_steps] = previous_audio[..., -audio_steps:].to(
+                device=target_audio.device, dtype=target_audio.dtype
+            )
+            out["samples"] = comfy.nested_tensor.NestedTensor((target_video, target_audio))
         return (out, overlap, None)
+
+
+class H3SeedHunterProjectContext:
+    """Load the accepted project's previous H3 AV latent when one exists."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "latent_path": ("STRING", {"forceInput": True}),
+            "project_token": ("STRING", {"forceInput": True}),
+        }}
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("context_latent",)
+    FUNCTION = "load"
+    CATEGORY = "conditioning/minimax/seedhunter/project"
+    DESCRIPTION = (
+        "Load the previous accepted clip's H3 AV safetensor. An empty path on "
+        "clip 1 intentionally returns no context."
+    )
+
+    def load(self, latent_path, project_token):
+        if not str(latent_path).strip():
+            return (None,)
+        return _h3("nodes").MiniMaxH3MotionContextLoadLatent().load(
+            str(latent_path), 0
+        )
+
+    @classmethod
+    def IS_CHANGED(cls, latent_path, project_token):
+        if not str(latent_path).strip():
+            return (str(project_token), "no-context")
+        return (str(project_token), _stamp(str(latent_path)))
 
 
 class H3SeedHunterRefineContext:
@@ -396,6 +451,7 @@ NODE_CLASS_MAPPINGS = {cls.__name__: cls for cls in (
     H3SeedHunterAudioInput, H3SeedHunterAudioRouter, H3SeedHunterSourceVideo, H3SeedHunterAVContext,
     H3SeedHunterRefineContext, H3SeedHunterOutputAudio, H3SeedHunterAssemble,
     H3SeedHunterSinglePassControl, H3SeedHunterProject, H3SeedHunterAcceptClip,
+    H3SeedHunterProjectContext,
 )}
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterAudioInput": "H3 SeedHunter Audio Mode",
@@ -408,4 +464,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterSinglePassControl": "H3 SeedHunter Single Pass Control",
     "H3SeedHunterProject": "H3 SeedHunter Long-Form Project",
     "H3SeedHunterAcceptClip": "H3 SeedHunter Accept Clip Into Project",
+    "H3SeedHunterProjectContext": "H3 SeedHunter Load Project Context",
 }
