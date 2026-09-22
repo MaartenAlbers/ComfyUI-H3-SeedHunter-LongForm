@@ -91,7 +91,7 @@ Review both picture and sound. The fast latent preview is only a progress aid; j
 
 Use **SINGLE PASS MODE — CONFIGURABLE RESOLUTION** when you want one direct generation instead of three previews followed by selection and refinement.
 
-Set **preview_megapixels** for normal preview mode and **single_pass_megapixels** for the direct run. Click **TURN ON SINGLE PASS** to keep Preview 1 active while bypassing Preview 2, Preview 3, preview selection, hybrid refinement and full-sequence assembly. Click **RESTORE PREVIEW MODE** to restore the previously active routing. The control title and color show the active mode, and the main resolution selector is synchronized automatically.
+Set **preview_megapixels** for normal preview mode and **single_pass_megapixels** for the direct run. Click **TURN ON SINGLE PASS** to keep Preview 1 active while bypassing Preview 2, Preview 3, preview selection, hybrid refinement and full-sequence assembly. This also enables the dedicated Preview 1 context-save node automatically. Its `.safetensors` checkpoint contains the motion/audio context required to continue with **Locked Audio**. After the render, use **USE AS SOURCE FOR NEXT CLIP** on the Preview 1 video node to load that result as the extension source and increment the clip number. The button rejects Preview 1 while normal Preview Mode is active, because that mode does not save the matching continuation checkpoint. Click **RESTORE PREVIEW MODE** to restore the previously active routing and bypass the dedicated context save again, so ordinary preview rerolls do not write checkpoints. The control title and color show the active mode, and the main resolution selector is synchronized automatically.
 
 ## 7. Select one preview
 

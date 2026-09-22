@@ -53,6 +53,11 @@ function notify(message) {
     console.info(`[SeedHunter] ${message}`);
 }
 
+function singlePassIsActive() {
+    const control = app.graph?._nodes?.find((node) => node.type === "H3SeedHunterSinglePassControl");
+    return control?.properties?.seedhunter_mode === "single";
+}
+
 async function sendToNextClip(outputNode) {
     const output = await resolvedOutput(outputNode);
     if (!output) throw new Error("Render and save this video first.");
@@ -119,6 +124,16 @@ async function sendToAudioReference(outputNode) {
 function installButtons(node) {
     if (node.type !== "VHS_VideoCombine") return;
     const title = node.title || "";
+    const isSinglePassOutput = Number(node.id) === 2296 || title.includes("HYBRID PREVIEW 1");
+    if (isSinglePassOutput && !widget(node, "USE AS SOURCE FOR NEXT CLIP")) {
+        node.addWidget("button", "USE AS SOURCE FOR NEXT CLIP", null, async () => {
+            try {
+                if (!singlePassIsActive()) throw new Error("Turn on Single Pass Mode before using Preview 1 as the next clip source.");
+                await sendToNextClip(node);
+            } catch (error) { alert(`SeedHunter: ${error.message}`); }
+        });
+        console.info("[SeedHunter] Installed next-clip button on the Single Pass output.");
+    }
     if ((Number(node.id) === 2675 || title.includes("FULL SEAMLESS VIDEO")) && !widget(node, "USE AS SOURCE FOR NEXT CLIP")) {
         node.addWidget("button", "USE AS SOURCE FOR NEXT CLIP", null, async () => {
             try { await sendToNextClip(node); } catch (error) { alert(`SeedHunter: ${error.message}`); }

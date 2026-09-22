@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 — 2026-09-21
+
+- Added a dedicated Preview 1 motion/audio-context checkpoint save for Single Pass Mode.
+- Made **TURN ON SINGLE PASS** enable that save automatically, preserving the `.safetensors` context required by Locked Audio continuations.
+- Made **RESTORE PREVIEW MODE** bypass the dedicated save again, preventing ordinary preview rerolls from writing checkpoints.
+- Added **USE AS SOURCE FOR NEXT CLIP** to the Preview 1 video output while Single Pass Mode is active.
+
 ## 1.3.0 — 2026-09-21
 
 - Added a configurable single-pass mode with separate preview and single-pass megapixel settings.

@@ -5,6 +5,7 @@ const NORMAL = 0;
 const BYPASS = 4;
 const PREVIEW_OUTPUTS = ["HYBRID PREVIEW 1", "HYBRID PREVIEW 2", "HYBRID PREVIEW 3"];
 const CONTROLLED_GROUPS = ["SELECT PREVIEW 1", "SELECT PREVIEW 2", "SELECT PREVIEW 3", "HYBRID FINAL UPSCALE PASS"];
+const SINGLE_PASS_CONTEXT_SAVE = "SAVE SINGLE PASS CONTEXT";
 
 const widget = (node, name) => node?.widgets?.find((item) => item.name === name);
 const findNode = (part) => (app.graph?._nodes || []).find((node) => (node.title || "").includes(part));
@@ -116,8 +117,11 @@ function enableSinglePass(control) {
     for (const node of nodesInControlledGroups()) setMode(node, BYPASS);
     const seamless = findNode("FULL SEAMLESS VIDEO");
     if (seamless) setMode(seamless, BYPASS);
+    const contextSave = findNode(SINGLE_PASS_CONTEXT_SAVE);
+    if (!contextSave) throw new Error("The single-pass context save node was not found.");
+    setMode(contextSave, NORMAL);
     setStatus(control, "single");
-    notify(`Single-pass mode enabled at ${mp} MP; Preview 1 remains active.`);
+    notify(`Single-pass mode enabled at ${mp} MP; Preview 1 and its locked-audio context save are active.`);
 }
 
 function restorePreview(control) {
@@ -141,6 +145,8 @@ function restorePreview(control) {
         if (seamless) setMode(seamless, NORMAL);
     }
     control.properties.seedhunter_saved_modes = {};
+    const contextSave = findNode(SINGLE_PASS_CONTEXT_SAVE);
+    if (contextSave) setMode(contextSave, BYPASS);
     setStatus(control, "preview");
     notify(`Preview mode restored at ${mp} MP.`);
 }
