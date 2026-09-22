@@ -45,23 +45,41 @@ function ensureSourcePreview(source) {
     return video;
 }
 
-function ensureTimelinePreview(node) {
+function timelinePreviewHost(projectNode) {
+    return findNode((item) => (item.title || "").includes("FULL SEAMLESS VIDEO") ||
+        item.properties?.seedhunter_timeline_preview) || projectNode;
+}
+
+function ensureTimelinePreview(projectNode) {
+    const node = timelinePreviewHost(projectNode);
     node.properties ||= {};
+    node.properties.seedhunter_timeline_preview = true;
     if (node.seedhunterTimelineVideoElement) return node.seedhunterTimelineVideoElement;
     if (typeof node.addDOMWidget !== "function") return null;
+    if (node !== projectNode) {
+        node.mode = 4;
+        node.title = "ASSEMBLED ACTIVE TIMELINE — PREVIEW ONLY";
+        node.color = "#346b6d";
+        node.bgcolor = "#203b3c";
+        const oldPreview = widget(node, "videopreview");
+        if (oldPreview?.value) {
+            oldPreview.value.hidden = true;
+            oldPreview.value.paused = true;
+        }
+    }
     const video = document.createElement("video");
     video.controls = true;
     video.preload = "metadata";
     video.playsInline = true;
     video.style.width = "100%";
-    video.style.maxHeight = "420px";
+    video.style.maxHeight = "720px";
     video.style.background = "#111";
     video.style.borderRadius = "6px";
     video.style.display = "none";
     node.addDOMWidget("ASSEMBLED TIMELINE PREVIEW", "video", video, {
         serialize: false,
         hideOnZoom: false,
-        getMinHeight: () => video.style.display === "none" ? 0 : 300,
+        getMinHeight: () => video.style.display === "none" ? 0 : 520,
     });
     node.seedhunterTimelineVideoElement = video;
     return video;
@@ -72,10 +90,17 @@ function disableLegacyAssembly() {
     if (!projectMode) return;
     for (const node of app.graph?._nodes || []) {
         const title = node.title || "";
-        if (node.type === "H3SeedHunterAssemble" || title.includes("FULL SEAMLESS VIDEO")) {
+        if (node.type === "H3SeedHunterAssemble" || title.includes("FULL SEAMLESS VIDEO") ||
+            node.properties?.seedhunter_timeline_preview) {
             node.mode = 4;
             node.properties ||= {};
             node.properties.seedhunter_project_legacy_disabled = true;
+            if (title.includes("FULL SEAMLESS VIDEO") || node.properties.seedhunter_timeline_preview) {
+                node.properties.seedhunter_timeline_preview = true;
+                node.title = "ASSEMBLED ACTIVE TIMELINE — PREVIEW ONLY";
+                node.color = "#346b6d";
+                node.bgcolor = "#203b3c";
+            }
             node.setDirtyCanvas?.(true, true);
         }
     }
@@ -324,7 +349,10 @@ function applySnapshot(node, snapshot) {
             timelinePreview.src = `/seedhunter/project/final-video?project_name=${encodeURIComponent(projectName)}&revision=${encodeURIComponent(snapshot.revision)}`;
             timelinePreview.style.display = "block";
             timelinePreview.load();
-            node.size[1] = Math.max(Number(node.size?.[1] || 0), 700);
+            const previewHost = timelinePreviewHost(node);
+            previewHost.size[0] = Math.max(Number(previewHost.size?.[0] || 0), 690);
+            previewHost.size[1] = Math.max(Number(previewHost.size?.[1] || 0), 760);
+            previewHost.setDirtyCanvas?.(true, true);
         } else {
             timelinePreview.pause();
             timelinePreview.removeAttribute("src");
