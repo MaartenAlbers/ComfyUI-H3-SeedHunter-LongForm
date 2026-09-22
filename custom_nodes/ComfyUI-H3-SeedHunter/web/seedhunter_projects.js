@@ -43,6 +43,24 @@ function ensureSourcePreview(source) {
     return video;
 }
 
+function updateClipDisplay(snapshot) {
+    const display = findNode((item) => item.type === "H3SeedHunterProjectClipIndex");
+    if (!display) return;
+    let status = widget(display, "CURRENT PROJECT CLIP");
+    if (!status) {
+        status = display.addWidget(
+            "text", "CURRENT PROJECT CLIP", "not loaded", () => {}, { serialize: false }
+        );
+    }
+    status.value = String(snapshot.next_clip_index);
+    display.title = `CURRENT PROJECT CLIP — ${snapshot.next_clip_index} (MANIFEST CONTROLLED)`;
+    display.color = "#346b6d";
+    display.bgcolor = "#203b3c";
+    display.size[0] = Math.max(Number(display.size?.[0] || 0), 530);
+    display.size[1] = Math.max(Number(display.size?.[1] || 0), 100);
+    display.setDirtyCanvas?.(true, true);
+}
+
 function notify(message) {
     app.extensionManager?.toast?.add?.({
         severity: "success", summary: "SeedHunter Project", detail: message, life: 5000,
@@ -136,6 +154,7 @@ function applySnapshot(node, snapshot) {
     node.properties ||= {};
     node.properties.seedhunter_project = snapshot;
     setWidget(node, "action", "load project");
+    updateClipDisplay(snapshot);
 
     const status = widget(node, "PROJECT STATUS");
     if (status) status.value = snapshot.status;
@@ -296,6 +315,11 @@ function installAcceptButton(node) {
 }
 
 function install(node) {
+    if (node.type === "H3SeedHunterProjectClipIndex") {
+        const project = findNode((item) => item.type === TYPE)?.properties?.seedhunter_project;
+        if (project) updateClipDisplay(project);
+        return;
+    }
     if (node.type !== TYPE) return;
     if (widget(node, "CREATE NEW PROJECT")) {
         refreshProjectSelector(node).catch((error) => console.warn("[SeedHunter]", error));

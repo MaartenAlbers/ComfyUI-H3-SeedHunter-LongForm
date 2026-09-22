@@ -235,6 +235,28 @@ class H3SeedHunterProjectContext:
         return (str(project_token), _stamp(str(latent_path)))
 
 
+class H3SeedHunterProjectClipIndex:
+    """Read-only manifest clip index relay with a browser-visible status card."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "clip_index": ("INT", {"forceInput": True}),
+        }}
+
+    RETURN_TYPES = ("INT",)
+    RETURN_NAMES = ("clip_index",)
+    FUNCTION = "relay"
+    CATEGORY = "conditioning/minimax/seedhunter/project"
+    DESCRIPTION = (
+        "Displays and relays the next clip index from Project State. The value "
+        "is manifest-controlled and cannot be edited independently."
+    )
+
+    def relay(self, clip_index):
+        return (int(clip_index),)
+
+
 class H3SeedHunterRefineContext:
     @classmethod
     def INPUT_TYPES(cls):
@@ -451,7 +473,7 @@ NODE_CLASS_MAPPINGS = {cls.__name__: cls for cls in (
     H3SeedHunterAudioInput, H3SeedHunterAudioRouter, H3SeedHunterSourceVideo, H3SeedHunterAVContext,
     H3SeedHunterRefineContext, H3SeedHunterOutputAudio, H3SeedHunterAssemble,
     H3SeedHunterSinglePassControl, H3SeedHunterProject, H3SeedHunterAcceptClip,
-    H3SeedHunterProjectContext,
+    H3SeedHunterProjectContext, H3SeedHunterProjectClipIndex,
 )}
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterAudioInput": "H3 SeedHunter Audio Mode",
@@ -465,4 +487,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterProject": "H3 SeedHunter Long-Form Project",
     "H3SeedHunterAcceptClip": "H3 SeedHunter Accept Clip Into Project",
     "H3SeedHunterProjectContext": "H3 SeedHunter Load Project Context",
+    "H3SeedHunterProjectClipIndex": "H3 SeedHunter Current Project Clip",
 }

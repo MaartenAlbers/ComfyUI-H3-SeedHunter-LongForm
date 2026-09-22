@@ -10,6 +10,7 @@ if ($workflow.nodes | Where-Object type -eq 'H3SeedHunterProject') {
 
 $nodeId = [int]$workflow.last_node_id + 1
 $contextNodeId = $nodeId + 1
+$clipDisplayNodeId = $contextNodeId + 1
 $order = (($workflow.nodes | Measure-Object -Property order -Maximum).Maximum + 1)
 $project = [pscustomobject]@{
     id = $nodeId
@@ -53,6 +54,7 @@ $contextPathLink = ++$linkId
 $projectTokenLink = ++$linkId
 $contextLatentLink = ++$linkId
 $sourceVideoLink = ++$linkId
+$projectClipLink = ++$linkId
 
 $contextLoader = [pscustomobject]@{
     id = $contextNodeId
@@ -79,6 +81,30 @@ $contextLoader = [pscustomobject]@{
     bgcolor = '#203b3c'
 }
 
+$clipDisplay = [pscustomobject]@{
+    id = $clipDisplayNodeId
+    type = 'H3SeedHunterProjectClipIndex'
+    pos = @(-2370.0, 1000.0)
+    size = @(530.0, 100.0)
+    flags = [pscustomobject]@{}
+    order = $order + 2
+    mode = 0
+    inputs = @(
+        [pscustomobject]@{ localized_name='clip_index'; name='clip_index'; type='INT'; link=$projectClipLink }
+    )
+    outputs = @(
+        [pscustomobject]@{ localized_name='clip_index'; name='clip_index'; type='INT'; links=@(1649,1650,31281) }
+    )
+    title = 'CURRENT PROJECT CLIP — LOAD A PROJECT'
+    properties = [pscustomobject]@{
+        'Node name for S&R' = 'H3SeedHunterProjectClipIndex'
+        ue_properties = [pscustomobject]@{ widget_ue_connectable=[pscustomobject]@{}; input_ue_unconnectable=[pscustomobject]@{}; version='7.8' }
+    }
+    widgets_values = $null
+    color = '#346b6d'
+    bgcolor = '#203b3c'
+}
+
 $avContext = $workflow.nodes | Where-Object id -eq 201
 $avContext.inputs = @($avContext.inputs) + [pscustomobject]@{
     localized_name='context_latent'; name='context_latent'; shape=7
@@ -93,26 +119,28 @@ $sourceNode = $workflow.nodes | Where-Object id -eq 2616
 $clipLinks = @(1649, 1650, 31281)
 foreach ($id in $clipLinks) {
     $link = $workflow.links | Where-Object { [int]$_[0] -eq $id }
-    $link[1] = $nodeId
-    $link[2] = 4
+    $link[1] = $clipDisplayNodeId
+    $link[2] = 0
 }
 $clipController = $workflow.nodes | Where-Object id -eq 2642
 $clipController.outputs[0].links = $null
 
 $project.outputs[3].links = @($projectTokenLink)
-$project.outputs[4].links = $clipLinks
+$project.outputs[4].links = @($projectClipLink)
 $project.outputs[5].links = @($sourceVideoLink)
 $project.outputs[6].links = @($contextPathLink)
 
 $workflow.nodes = @($workflow.nodes) + $contextLoader
 $workflow.nodes = @($workflow.nodes | Where-Object { [int]$_.id -ne 2642 })
+$workflow.nodes = @($workflow.nodes) + $clipDisplay
 $workflow.links = @($workflow.links) +
     ,@($contextPathLink, $nodeId, 6, $contextNodeId, 0, 'STRING') +
     ,@($projectTokenLink, $nodeId, 3, $contextNodeId, 1, 'STRING') +
     ,@($contextLatentLink, $contextNodeId, 0, 201, 9, 'LATENT') +
-    ,@($sourceVideoLink, $nodeId, 5, 2616, 1, 'STRING')
+    ,@($sourceVideoLink, $nodeId, 5, 2616, 1, 'STRING') +
+    ,@($projectClipLink, $nodeId, 4, $clipDisplayNodeId, 0, 'INT')
 
-$workflow.last_node_id = $contextNodeId
+$workflow.last_node_id = $clipDisplayNodeId
 $workflow.last_link_id = $linkId
 $workflow.revision = [int]$workflow.revision + 1
 $workflow.extra.h3_longform_seedhunter.release_version = '1.4-dev'
