@@ -238,6 +238,7 @@ def project_snapshot(output_directory, project_name):
         "previous_clip_video": absolute(latest.get("video", "")),
         "previous_context_latent": absolute(latest.get("context", "")),
         "master_audio": absolute(settings.get("master_audio", "")),
+        "workflow_settings": dict(settings.get("workflow", {})),
         "prompt": prompt,
         "reference_images": list(latest.get("reference_images", [])),
         "active_head_id": latest.get("record_id", ""),
@@ -352,6 +353,48 @@ def checkout_clip(output_directory, project_name, project_token, record_id):
     return project_snapshot(output_directory, project_name)
 
 
+def _clean_workflow_settings(settings):
+    if not isinstance(settings, dict):
+        raise ValueError("Workflow settings must be a JSON object.")
+    cleaned = {}
+    numeric = {
+        "clip_seconds": (0.1, 3600.0),
+        "preview_megapixels": (0.1, 4.0),
+        "single_pass_megapixels": (0.1, 4.0),
+        "context_frames": (1, 9999),
+    }
+    for name, (minimum, maximum) in numeric.items():
+        if name not in settings:
+            continue
+        value = float(settings[name])
+        if not minimum <= value <= maximum:
+            raise ValueError(f"Project setting {name} is outside its valid range.")
+        cleaned[name] = int(value) if name == "context_frames" else value
+    if "audio_mode" in settings:
+        mode = str(settings["audio_mode"])
+        if mode not in ("locked audio", "audio reference", "generate audio", "silent audio"):
+            raise ValueError("Project contains an unknown audio mode.")
+        cleaned["audio_mode"] = mode
+    if "run_mode" in settings:
+        mode = str(settings["run_mode"])
+        if mode not in ("preview", "single"):
+            raise ValueError("Project run mode must be preview or single.")
+        cleaned["run_mode"] = mode
+    return cleaned
+
+
+def save_project_settings(output_directory, project_name, project_token, settings):
+    data, directory = load_project(output_directory, project_name)
+    expected_token = f"{data['project_id']}:{data['revision']}"
+    if str(project_token) != expected_token:
+        raise ValueError("Project state changed. Reload it before saving settings.")
+    data.setdefault("settings", {})["workflow"] = _clean_workflow_settings(settings)
+    data["revision"] = int(data["revision"]) + 1
+    data["updated_at"] = _now()
+    _write_json_atomic(directory / "project.json", data)
+    return project_snapshot(output_directory, project_name)
+
+
 def accept_clip(
     output_directory,
     project_name,
@@ -365,6 +408,7 @@ def accept_clip(
     audio_mode,
     fps=24.0,
     reference_images=None,
+    workflow_settings=None,
 ):
     data, directory = load_project(output_directory, project_name)
     expected_token = f"{data['project_id']}:{data['revision']}"
@@ -427,6 +471,10 @@ def accept_clip(
         "accepted_at": _now(),
     })
     data["active_timeline"].append(record_id)
+    if workflow_settings is not None:
+        data.setdefault("settings", {})["workflow"] = _clean_workflow_settings(
+            workflow_settings
+        )
     data["next_clip_index"] = index + 1
     data["revision"] = int(data["revision"]) + 1
     data["updated_at"] = _now()

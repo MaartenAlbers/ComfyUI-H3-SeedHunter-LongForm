@@ -16,7 +16,7 @@ $project = [pscustomobject]@{
     id = $nodeId
     type = 'H3SeedHunterProject'
     pos = @(-3460.0, -700.0)
-    size = @(620.0, 310.0)
+    size = @(620.0, 340.0)
     flags = [pscustomobject]@{}
     order = $order
     mode = 0
@@ -147,9 +147,9 @@ $workflow.extra.h3_longform_seedhunter.release_version = '1.4-dev'
 $workflow.extra.h3_longform_seedhunter | Add-Member -NotePropertyName project_state_schema -NotePropertyValue 2
 $workflow.extra.pixaromaGroups = @($workflow.extra.pixaromaGroups) + [pscustomobject]@{
     id='pg_seedhunter_project_v14'; title='PROJECT STATE — CREATE / LOAD / RESUME'
-    x=-3490; y=-750; w=680; h=300
+    x=-3490; y=-750; w=680; h=340
     titleColor='#4f9497'; bodyColor='#173334'; titleAlpha=0.92; bodyAlpha=0.5
-    fontSize=18; wOpen=680; hOpen=300; folded=$false; showLinks=$true
+    fontSize=18; wOpen=680; hOpen=340; folded=$false; showLinks=$true
 }
 
 $workflow | ConvertTo-Json -Depth 100 -Compress | Set-Content -LiteralPath $target -Encoding utf8NoBOM

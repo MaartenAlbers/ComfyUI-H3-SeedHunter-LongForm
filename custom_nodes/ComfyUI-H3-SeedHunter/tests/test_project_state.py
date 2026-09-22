@@ -111,6 +111,59 @@ class ProjectStateTests(unittest.TestCase):
                 video, context, "", 243, 0, "locked audio", 24.0,
             )
 
+    def test_save_and_restore_project_workflow_settings(self):
+        data, _ = project_state.create_project(self.output, "Film One")
+        settings = {
+            "clip_seconds": 8.5,
+            "preview_megapixels": 0.6,
+            "single_pass_megapixels": 1.8,
+            "context_frames": 56,
+            "audio_mode": "generate audio",
+            "run_mode": "single",
+        }
+
+        snapshot = project_state.save_project_settings(
+            self.output, "Film One", f"{data['project_id']}:1", settings
+        )
+
+        self.assertEqual(snapshot["revision"], 2)
+        self.assertEqual(snapshot["workflow_settings"], settings)
+        reloaded = project_state.project_snapshot(self.output, "Film One")
+        self.assertEqual(reloaded["workflow_settings"], settings)
+
+    def test_accept_clip_automatically_saves_workflow_settings(self):
+        data, _ = project_state.create_project(self.output, "Film One")
+        video = self.output / "render.mp4"
+        context = self.output / "render.safetensors"
+        video.write_bytes(b"video")
+        context.write_bytes(b"latent")
+        settings = {
+            "clip_seconds": 6.0,
+            "preview_megapixels": 0.5,
+            "single_pass_megapixels": 1.5,
+            "context_frames": 39,
+            "audio_mode": "audio reference",
+            "run_mode": "preview",
+        }
+
+        snapshot = project_state.accept_clip(
+            self.output, "Film One", f"{data['project_id']}:1", 1,
+            video, context, "Prompt", 243, 0, "audio reference", 24.0,
+            [], settings,
+        )
+
+        self.assertEqual(snapshot["workflow_settings"], settings)
+
+    def test_invalid_project_workflow_setting_is_rejected(self):
+        data, _ = project_state.create_project(self.output, "Film One")
+        with self.assertRaisesRegex(ValueError, "outside its valid range"):
+            project_state.save_project_settings(
+                self.output,
+                "Film One",
+                f"{data['project_id']}:1",
+                {"clip_seconds": 0},
+            )
+
     def test_continuation_requires_overlap(self):
         data, _ = project_state.create_project(self.output, "Film One")
         video = self.output / "render.mp4"

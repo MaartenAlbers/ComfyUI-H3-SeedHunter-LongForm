@@ -16,6 +16,7 @@ from .project_state import (
     project_snapshot,
     resolve_context_checkpoint,
     resolve_output_asset,
+    save_project_settings,
 )
 
 
@@ -117,6 +118,24 @@ async def checkout_seedhunter_project_clip(request):
         return web.json_response({"error": str(exc)}, status=400)
 
 
+@PromptServer.instance.routes.post("/seedhunter/project/save-settings")
+async def save_seedhunter_project_settings(request):
+    """Persist the project-owned subset of the current workflow controls."""
+    try:
+        data = await request.json()
+        snapshot = save_project_settings(
+            folder_paths.get_output_directory(),
+            str(data.get("project_name", "")),
+            str(data.get("project_token", "")),
+            data.get("settings", {}),
+        )
+        return web.json_response(snapshot)
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except (ValueError, OSError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+
 @PromptServer.instance.routes.get("/seedhunter/projects")
 async def list_seedhunter_projects(request):
     """List valid project manifests in the active ComfyUI output folder."""
@@ -165,6 +184,7 @@ async def accept_seedhunter_project_clip(request):
             str(data.get("audio_mode", "")),
             float(data.get("fps", 24.0)),
             data.get("reference_images", []),
+            data.get("workflow_settings"),
         )
         return web.json_response(snapshot)
     except FileNotFoundError as exc:

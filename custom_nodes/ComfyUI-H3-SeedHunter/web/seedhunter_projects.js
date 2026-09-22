@@ -200,6 +200,54 @@ function validH3Frames(seconds) {
     return requested + ((5 - (requested % 17)) % 17);
 }
 
+function collectProjectSettings() {
+    const control = findNode((item) => item.type === "H3SeedHunterSinglePassControl");
+    return {
+        clip_seconds: Number(valueOfNode("PrimitiveFloat", "Number of seconds clip", "value")),
+        audio_mode: String(valueOfNode("H3SeedHunterAudioRouter", "AUDIO MODE", "audio_mode") || ""),
+        context_frames: Number(valueOfNode("H3SeedHunterAVContext", "PREVIEW", "context_length") || 39),
+        preview_megapixels: Number(widget(control, "preview_megapixels")?.value || 0.5),
+        single_pass_megapixels: Number(widget(control, "single_pass_megapixels")?.value || 1.5),
+        run_mode: control?.properties?.seedhunter_mode === "single" ? "single" : "preview",
+    };
+}
+
+function applyProjectSettings(snapshot) {
+    const settings = snapshot?.workflow_settings;
+    if (!settings || !Object.keys(settings).length) return;
+    const duration = findNode((item) =>
+        item.type === "PrimitiveFloat" && (item.title || "").includes("Number of seconds clip")
+    );
+    if (settings.clip_seconds !== undefined) setWidget(duration, "value", Number(settings.clip_seconds));
+
+    const router = findNode((item) => item.type === "H3SeedHunterAudioRouter");
+    if (settings.audio_mode) setWidget(router, "audio_mode", settings.audio_mode);
+
+    const context = findNode((item) => item.type === "H3SeedHunterAVContext");
+    if (settings.context_frames !== undefined) {
+        setWidget(context, "context_length", Number(settings.context_frames));
+    }
+
+    const control = findNode((item) => item.type === "H3SeedHunterSinglePassControl");
+    if (control) {
+        if (settings.preview_megapixels !== undefined) {
+            setWidget(control, "preview_megapixels", Number(settings.preview_megapixels));
+        }
+        if (settings.single_pass_megapixels !== undefined) {
+            setWidget(control, "single_pass_megapixels", Number(settings.single_pass_megapixels));
+        }
+        const buttonName = settings.run_mode === "single"
+            ? "TURN ON SINGLE PASS"
+            : "RESTORE PREVIEW MODE";
+        const button = widget(control, buttonName);
+        if (button?.callback) button.callback();
+        else {
+            control.properties ||= {};
+            control.properties.seedhunter_mode = settings.run_mode || "preview";
+        }
+    }
+}
+
 function valueOfNode(type, titlePart, widgetName) {
     const node = findNode((item) =>
         item.type === type && (!titlePart || (item.title || "").includes(titlePart))
@@ -213,6 +261,7 @@ function applySnapshot(node, snapshot) {
     setWidget(node, "action", "load project");
     updateClipDisplay(snapshot);
     updateContinuationSelector(node, snapshot);
+    applyProjectSettings(snapshot);
 
     const status = widget(node, "PROJECT STATUS");
     if (status) status.value = snapshot.status;
@@ -354,12 +403,31 @@ async function acceptRenderedClip(outputNode) {
             audio_mode: audioMode,
             fps,
             reference_images: referenceImages,
+            workflow_settings: collectProjectSettings(),
         }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Could not accept the clip.");
     applySnapshot(projectNode, result);
     notify(`Accepted clip ${clipIndex}; project now expects clip ${result.next_clip_index}.`);
+}
+
+async function saveCurrentProjectState(node) {
+    const project = node.properties?.seedhunter_project;
+    if (!project?.project_token) throw new Error("Create or load a project first.");
+    const response = await fetch("/seedhunter/project/save-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            project_name: String(widget(node, "project_name")?.value || ""),
+            project_token: project.project_token,
+            settings: collectProjectSettings(),
+        }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not save project state.");
+    applySnapshot(node, result);
+    notify(`Saved workflow state for ${result.status}`);
 }
 
 function installAcceptButton(node) {
@@ -394,6 +462,10 @@ function install(node) {
         try { await perform(node, "load"); }
         catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
+    node.addWidget("button", "SAVE CURRENT PROJECT STATE", null, async () => {
+        try { await saveCurrentProjectState(node); }
+        catch (error) { alert(`SeedHunter Project: ${error.message}`); }
+    });
     node.addWidget("button", "REFRESH PROJECT LIST", null, async () => {
         try {
             const projects = await refreshProjectSelector(node);
@@ -401,7 +473,7 @@ function install(node) {
         } catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 620);
-    node.size[1] = Math.max(Number(node.size?.[1] || 0), 310);
+    node.size[1] = Math.max(Number(node.size?.[1] || 0), 340);
 
     const saved = node.properties.seedhunter_project;
     if (saved?.status) applySnapshot(node, saved);
