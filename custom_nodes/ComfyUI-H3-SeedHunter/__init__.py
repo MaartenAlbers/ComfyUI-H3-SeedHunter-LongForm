@@ -11,6 +11,7 @@ from .seedhunter_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from .project_state import (
     accept_clip,
     create_project,
+    list_projects,
     project_snapshot,
     resolve_context_checkpoint,
     resolve_output_asset,
@@ -95,6 +96,14 @@ async def load_seedhunter_project(request):
         return web.json_response({"error": str(exc)}, status=404)
     except (ValueError, OSError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
+
+
+@PromptServer.instance.routes.get("/seedhunter/projects")
+async def list_seedhunter_projects(request):
+    """List valid project manifests in the active ComfyUI output folder."""
+    return web.json_response({
+        "projects": list_projects(folder_paths.get_output_directory())
+    })
 
 
 @PromptServer.instance.routes.post("/seedhunter/project/accept")

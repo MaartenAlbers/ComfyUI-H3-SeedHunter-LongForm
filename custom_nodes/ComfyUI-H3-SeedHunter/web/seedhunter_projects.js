@@ -38,6 +38,39 @@ async function requestProject(action, projectName) {
     return result;
 }
 
+async function fetchProjects() {
+    const response = await fetch("/seedhunter/projects");
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not list projects.");
+    return Array.isArray(result.projects) ? result.projects : [];
+}
+
+async function refreshProjectSelector(node, selectName = null) {
+    const projects = await fetchProjects();
+    const names = projects.map((item) => item.name);
+    const choices = names.length ? names : ["(no projects found)"];
+    let selector = widget(node, "AVAILABLE PROJECTS");
+    if (!selector) {
+        selector = node.addWidget("combo", "AVAILABLE PROJECTS", choices[0], (value) => {
+            if (!names.includes(value)) return;
+            setWidget(node, "project_name", value);
+            perform(node, "load").catch((error) => {
+                alert(`SeedHunter Project: ${error.message}`);
+            });
+        }, { values: choices, serialize: false });
+    } else {
+        selector.options ||= {};
+        selector.options.values = choices;
+    }
+
+    const current = selectName || String(widget(node, "project_name")?.value || "");
+    selector.value = names.includes(current) ? current : choices[0];
+    node.properties ||= {};
+    node.properties.seedhunter_project_names = names;
+    node.setDirtyCanvas?.(true, true);
+    return projects;
+}
+
 function latestOutput(node) {
     const preview = node?.widgets?.find((item) => item.name === "videopreview");
     const params = preview?.value?.params || preview?.options?.params;
@@ -120,6 +153,7 @@ async function perform(node, action) {
     if (!projectName) throw new Error("Enter a project name first.");
     const snapshot = await requestProject(action, projectName);
     applySnapshot(node, snapshot);
+    await refreshProjectSelector(node, snapshot.project_path?.split(/[\\/]/).pop() || projectName);
     notify(action === "create" ? `Created ${snapshot.status}` : `Loaded ${snapshot.status}`);
 }
 
@@ -190,8 +224,13 @@ function installAcceptButton(node) {
 }
 
 function install(node) {
-    if (node.type !== TYPE || widget(node, "CREATE NEW PROJECT")) return;
+    if (node.type !== TYPE) return;
+    if (widget(node, "CREATE NEW PROJECT")) {
+        refreshProjectSelector(node).catch((error) => console.warn("[SeedHunter]", error));
+        return;
+    }
     node.properties ||= {};
+    refreshProjectSelector(node).catch((error) => console.warn("[SeedHunter]", error));
     node.addWidget("text", "PROJECT STATUS", "No project loaded", () => {}, { serialize: false });
     node.addWidget("button", "CREATE NEW PROJECT", null, async () => {
         try { await perform(node, "create"); }
@@ -201,8 +240,14 @@ function install(node) {
         try { await perform(node, "load"); }
         catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
+    node.addWidget("button", "REFRESH PROJECT LIST", null, async () => {
+        try {
+            const projects = await refreshProjectSelector(node);
+            notify(`Found ${projects.length} project(s).`);
+        } catch (error) { alert(`SeedHunter Project: ${error.message}`); }
+    });
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 620);
-    node.size[1] = Math.max(Number(node.size?.[1] || 0), 220);
+    node.size[1] = Math.max(Number(node.size?.[1] || 0), 270);
 
     const saved = node.properties.seedhunter_project;
     if (saved?.status) applySnapshot(node, saved);

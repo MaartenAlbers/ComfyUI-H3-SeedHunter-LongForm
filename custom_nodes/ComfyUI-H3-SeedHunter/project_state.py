@@ -185,6 +185,28 @@ def project_stamp(output_directory, project_name):
     return (str(path), info.st_size, info.st_mtime_ns)
 
 
+def list_projects(output_directory):
+    root = Path(output_directory).resolve() / PROJECTS_FOLDER
+    if not root.is_dir():
+        return []
+    projects = []
+    for directory in sorted(root.iterdir(), key=lambda item: item.name.casefold()):
+        if not directory.is_dir() or not (directory / "project.json").is_file():
+            continue
+        try:
+            snapshot = project_snapshot(output_directory, directory.name)
+        except (ValueError, OSError, json.JSONDecodeError):
+            continue
+        projects.append({
+            "name": directory.name,
+            "status": snapshot["status"],
+            "project_id": snapshot["project_id"],
+            "revision": snapshot["revision"],
+            "next_clip_index": snapshot["next_clip_index"],
+        })
+    return projects
+
+
 def resolve_output_asset(output_directory, value, expected_suffix=None):
     """Resolve an absolute or output-relative asset without leaving output."""
     root = Path(output_directory).resolve()

@@ -136,6 +136,20 @@ class ProjectStateTests(unittest.TestCase):
         finally:
             outside.unlink(missing_ok=True)
 
+    def test_list_projects_returns_only_valid_manifests(self):
+        first, _ = project_state.create_project(self.output, "Zulu")
+        second, _ = project_state.create_project(self.output, "Alpha")
+        invalid = self.output / project_state.PROJECTS_FOLDER / "Broken"
+        invalid.mkdir()
+        (invalid / "project.json").write_text("not json", encoding="utf-8")
+
+        projects = project_state.list_projects(self.output)
+        self.assertEqual([item["name"] for item in projects], ["Alpha", "Zulu"])
+        self.assertEqual(
+            {item["project_id"] for item in projects},
+            {first["project_id"], second["project_id"]},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
