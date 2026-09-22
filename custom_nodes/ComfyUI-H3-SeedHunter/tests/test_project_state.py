@@ -208,6 +208,9 @@ class ProjectStateTests(unittest.TestCase):
         filter_graph = command[command.index("-filter_complex") + 1]
         self.assertIn("N/38", filter_graph)
         self.assertIn("concat=n=5:v=1:a=0", filter_graph)
+        self.assertIn("atrim=start=1.625", filter_graph)
+        self.assertIn("concat=n=3:v=0:a=1", filter_graph)
+        self.assertNotIn("acrossfade", filter_graph)
         self.assertEqual(snapshot["final_frame_count"], 294)
         self.assertAlmostEqual(snapshot["final_duration"], 12.25)
         self.assertEqual(snapshot["revision"], 2)

@@ -467,27 +467,23 @@ def assemble_project(output_directory, project_name, project_token):
             video_parts.append(f"[{blend}]")
     filters.append("".join(video_parts) + f"concat=n={len(video_parts)}:v=1:a=0[v]")
 
-    for index in range(len(records)):
+    audio_parts = []
+    for index, record in enumerate(records):
+        overlap = int(record.get("overlap_frames", 0)) if index else 0
+        start = overlap / fps
+        label = f"a{index}"
         filters.append(
-            f"[{index}:a]aresample=32000,asetpts=PTS-STARTPTS[a{index}]"
+            f"[{index}:a]aresample=32000,atrim=start={start:.12g},"
+            f"asetpts=PTS-STARTPTS[{label}]"
         )
-    audio_label = "a0"
-    for index in range(1, len(records)):
-        overlap = int(records[index].get("overlap_frames", 0))
-        duration = overlap / fps
-        next_label = f"ax{index}"
-        filters.append(
-            f"[{audio_label}][a{index}]acrossfade=d={duration:.12g}:"
-            f"c1=tri:c2=tri[{next_label}]"
-        )
-        audio_label = next_label
+        audio_parts.append(f"[{label}]")
     total_frames = sum(int(item["frame_count"]) for item in records) - sum(
         int(item.get("overlap_frames", 0)) for item in records[1:]
     )
     total_seconds = total_frames / fps
     filters.append(
-        f"[{audio_label}]apad=whole_dur={total_seconds:.12g},"
-        f"atrim=duration={total_seconds:.12g}[a]"
+        "".join(audio_parts) + f"concat=n={len(audio_parts)}:v=0:a=1,"
+        f"apad=whole_dur={total_seconds:.12g},atrim=duration={total_seconds:.12g}[a]"
     )
 
     renders = directory / "renders"
