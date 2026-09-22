@@ -160,6 +160,12 @@ def project_snapshot(output_directory, project_name):
         return str(candidate)
 
     settings = data.get("settings", {})
+    prompt = ""
+    prompt_relative = latest.get("prompt", "")
+    if prompt_relative:
+        prompt_path = Path(absolute(prompt_relative))
+        if prompt_path.is_file():
+            prompt = prompt_path.read_text(encoding="utf-8")
     status = (
         f"{data['name']}: {len(clips)} accepted clip(s); "
         f"next clip {data['next_clip_index']}; revision {data['revision']}"
@@ -173,6 +179,8 @@ def project_snapshot(output_directory, project_name):
         "previous_clip_video": absolute(latest.get("video", "")),
         "previous_context_latent": absolute(latest.get("context", "")),
         "master_audio": absolute(settings.get("master_audio", "")),
+        "prompt": prompt,
+        "reference_images": list(latest.get("reference_images", [])),
         "status": status,
     }
 
@@ -267,6 +275,7 @@ def accept_clip(
     overlap_frames,
     audio_mode,
     fps=24.0,
+    reference_images=None,
 ):
     data, directory = load_project(output_directory, project_name)
     expected_token = f"{data['project_id']}:{data['revision']}"
@@ -313,6 +322,8 @@ def accept_clip(
         "overlap_frames": overlap,
         "fps": rate,
         "audio_mode": str(audio_mode),
+        # Preserve empty slots so Picture 3 can never shift into Picture 2.
+        "reference_images": [str(value) for value in (reference_images or [])],
         "accepted_at": _now(),
     })
     data["next_clip_index"] = index + 1

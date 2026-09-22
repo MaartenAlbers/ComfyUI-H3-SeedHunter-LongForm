@@ -79,6 +79,7 @@ class ProjectStateTests(unittest.TestCase):
             0,
             "locked audio",
             24.0,
+            ["hero.png", "wardrobe.png"],
         )
 
         self.assertEqual(snapshot["revision"], 2)
@@ -89,6 +90,8 @@ class ProjectStateTests(unittest.TestCase):
             (directory / "prompts" / "clip_00001.txt").read_text(encoding="utf-8"),
             "A test prompt",
         )
+        self.assertEqual(snapshot["prompt"], "A test prompt")
+        self.assertEqual(snapshot["reference_images"], ["hero.png", "wardrobe.png"])
 
     def test_accept_clip_rejects_stale_project_token(self):
         data, _ = project_state.create_project(self.output, "Film One")

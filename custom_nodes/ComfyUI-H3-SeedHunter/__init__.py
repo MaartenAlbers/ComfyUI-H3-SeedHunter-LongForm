@@ -129,6 +129,7 @@ async def accept_seedhunter_project_clip(request):
             int(data.get("overlap_frames", 0)),
             str(data.get("audio_mode", "")),
             float(data.get("fps", 24.0)),
+            data.get("reference_images", []),
         )
         return web.json_response(snapshot)
     except FileNotFoundError as exc:

@@ -142,6 +142,31 @@ function applySnapshot(node, snapshot) {
         setWidget(source, "start_mode", extending ? "extend video" : "new clip");
         setWidget(source, "video", extending ? snapshot.previous_clip_video : "");
         setWidget(source, "use_source_audio", true);
+        let sourceStatus = widget(source, "PROJECT SOURCE VIDEO");
+        if (!sourceStatus) {
+            sourceStatus = source.addWidget(
+                "text", "PROJECT SOURCE VIDEO", "new clip", () => {}, { serialize: false }
+            );
+        }
+        sourceStatus.value = extending ? snapshot.previous_clip_video : "new clip";
+        source.size[0] = Math.max(Number(source.size?.[0] || 0), 650);
+        source.setDirtyCanvas?.(true, true);
+    }
+
+    const promptNode = findNode((item) =>
+        item.type === "MiniMaxH3ReferenceToVideo" && (item.title || "").includes("ROLLING CLIP")
+    );
+    if (promptNode && typeof snapshot.prompt === "string" && snapshot.prompt) {
+        setWidget(promptNode, "prompt", snapshot.prompt);
+    }
+
+    const references = Array.isArray(snapshot.reference_images) ? snapshot.reference_images : [];
+    for (let index = 0; index < 4; index += 1) {
+        if (!references[index]) continue;
+        const picture = findNode((item) =>
+            item.type === "LoadImage" && (item.title || "").includes(`<Picture ${index + 1}>`)
+        );
+        setWidget(picture, "image", references[index]);
     }
 
     node.setDirtyCanvas?.(true, true);
@@ -186,6 +211,13 @@ async function acceptRenderedClip(outputNode) {
     const audioMode = String(valueOfNode("H3SeedHunterAudioRouter", "AUDIO MODE", "audio_mode") || "");
     const fps = Number(widget(outputNode, "frame_rate")?.value || 24);
     const contextPrefix = String(widget(contextSave, "filename_prefix")?.value || contextSave.widgets?.[0]?.value || "");
+    const referenceImages = [];
+    for (let index = 1; index <= 4; index += 1) {
+        const picture = findNode((item) =>
+            item.type === "LoadImage" && (item.title || "").includes(`<Picture ${index}>`)
+        );
+        referenceImages.push(String(widget(picture, "image")?.value || ""));
+    }
 
     if (!Number.isInteger(clipIndex) || clipIndex < 1) throw new Error("Invalid next clip number.");
     if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("Invalid clip duration.");
@@ -205,6 +237,7 @@ async function acceptRenderedClip(outputNode) {
             overlap_frames: clipIndex === 1 ? 0 : contextLength,
             audio_mode: audioMode,
             fps,
+            reference_images: referenceImages,
         }),
     });
     const result = await response.json();
