@@ -9,6 +9,8 @@ import folder_paths
 import nodes
 from comfy_extras.nodes_audio import load as load_audio, vae_decode_audio
 
+from .project_state import accept_clip, create_project, project_snapshot, project_stamp
+
 # Resolve the existing H3 package only during execution, after custom-node loading.
 # Do not import its __init__ again or register/patch any of its node classes.
 def _h3(module):
@@ -295,10 +297,105 @@ class H3SeedHunterSinglePassControl:
         return (float(preview_megapixels), float(single_pass_megapixels))
 
 
+class H3SeedHunterProject:
+    """Create or load a persistent SeedHunter long-form project."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "project_name": ("STRING", {
+                "default": "my_first_project",
+                "multiline": False,
+                "tooltip": "Folder name under ComfyUI/output/h3_projects.",
+            }),
+            "action": (["load project", "create project"],),
+        }}
+
+    RETURN_TYPES = ("STRING", "STRING", "INT", "STRING", "INT", "STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = (
+        "project_path", "project_id", "project_revision", "project_token",
+        "next_clip_index", "previous_clip_video", "previous_context_latent",
+        "master_audio", "project_status",
+    )
+    FUNCTION = "open"
+    CATEGORY = "conditioning/minimax/seedhunter/project"
+    DESCRIPTION = (
+        "Create or load an H3 long-form project manifest. The project token "
+        "changes with every manifest revision so downstream cache keys cannot "
+        "silently reuse another project's state."
+    )
+
+    def open(self, project_name, action):
+        output = folder_paths.get_output_directory()
+        if action == "create project":
+            create_project(output, project_name)
+        elif action != "load project":
+            raise ValueError(f"Unknown project action: {action}")
+        snapshot = project_snapshot(output, project_name)
+        return tuple(snapshot[name] for name in (
+            "project_path", "project_id", "revision", "project_token",
+            "next_clip_index", "previous_clip_video", "previous_context_latent",
+            "master_audio", "status",
+        ))
+
+    @classmethod
+    def IS_CHANGED(cls, project_name, action):
+        if action == "create project":
+            return float("NaN")
+        return (action, project_stamp(folder_paths.get_output_directory(), project_name))
+
+
+class H3SeedHunterAcceptClip:
+    """Commit an MP4/context pair to the currently loaded project revision."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "project_name": ("STRING", {"default": "my_first_project"}),
+            "project_token": ("STRING", {"forceInput": True}),
+            "clip_index": ("INT", {"forceInput": True}),
+            "video_path": ("STRING", {"default": ""}),
+            "context_path": ("STRING", {"default": ""}),
+            "prompt": ("STRING", {"default": "", "multiline": True}),
+            "frame_count": ("INT", {"default": 243, "min": 1}),
+            "overlap_frames": ("INT", {"default": 0, "min": 0}),
+            "audio_mode": (MODES,),
+            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "step": 0.001}),
+        }}
+
+    RETURN_TYPES = ("STRING", "INT", "STRING", "STRING", "STRING")
+    RETURN_NAMES = (
+        "project_token", "next_clip_index", "accepted_video",
+        "accepted_context", "project_status",
+    )
+    FUNCTION = "accept"
+    OUTPUT_NODE = True
+    CATEGORY = "conditioning/minimax/seedhunter/project"
+    DESCRIPTION = (
+        "Atomically register the next accepted final clip. The MP4 and matching "
+        "H3 AV safetensor are copied into fixed project slots before project.json "
+        "advances to the next clip."
+    )
+
+    def accept(self, project_name, project_token, clip_index, video_path,
+               context_path, prompt, frame_count, overlap_frames, audio_mode,
+               fps=24.0):
+        snapshot = accept_clip(
+            folder_paths.get_output_directory(), project_name, project_token,
+            clip_index, video_path, context_path, prompt, frame_count,
+            overlap_frames, audio_mode, fps,
+        )
+        return (
+            snapshot["project_token"], snapshot["next_clip_index"],
+            snapshot["previous_clip_video"],
+            snapshot["previous_context_latent"], snapshot["status"],
+        )
+
+
 NODE_CLASS_MAPPINGS = {cls.__name__: cls for cls in (
     H3SeedHunterAudioInput, H3SeedHunterAudioRouter, H3SeedHunterSourceVideo, H3SeedHunterAVContext,
     H3SeedHunterRefineContext, H3SeedHunterOutputAudio, H3SeedHunterAssemble,
-    H3SeedHunterSinglePassControl,
+    H3SeedHunterSinglePassControl, H3SeedHunterProject, H3SeedHunterAcceptClip,
 )}
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterAudioInput": "H3 SeedHunter Audio Mode",
@@ -309,4 +406,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3SeedHunterOutputAudio": "H3 SeedHunter Output Audio",
     "H3SeedHunterAssemble": "H3 SeedHunter Seamless Assembly",
     "H3SeedHunterSinglePassControl": "H3 SeedHunter Single Pass Control",
+    "H3SeedHunterProject": "H3 SeedHunter Long-Form Project",
+    "H3SeedHunterAcceptClip": "H3 SeedHunter Accept Clip Into Project",
 }
