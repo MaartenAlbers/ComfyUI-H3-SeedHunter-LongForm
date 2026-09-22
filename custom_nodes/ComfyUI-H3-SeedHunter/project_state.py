@@ -185,6 +185,31 @@ def project_stamp(output_directory, project_name):
     return (str(path), info.st_size, info.st_mtime_ns)
 
 
+def resolve_output_asset(output_directory, value, expected_suffix=None):
+    """Resolve an absolute or output-relative asset without leaving output."""
+    root = Path(output_directory).resolve()
+    raw = Path(str(value).strip().strip('"'))
+    candidate = raw.resolve() if raw.is_absolute() else (root / raw).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError("Asset path is outside the active ComfyUI output folder.")
+    if expected_suffix and candidate.suffix.lower() != str(expected_suffix).lower():
+        raise ValueError(f"Expected a {expected_suffix} asset, got {candidate.name}.")
+    if not candidate.is_file():
+        raise FileNotFoundError(f"Project asset does not exist: {candidate}")
+    return candidate
+
+
+def resolve_context_checkpoint(output_directory, filename_prefix, clip_index):
+    prefix = str(filename_prefix).replace("\\", "/").strip("/").strip()
+    if not prefix:
+        raise ValueError("Context checkpoint filename prefix is empty.")
+    relative = Path(*prefix.split("/"))
+    filename = f"{relative.name}_{int(clip_index):05d}.safetensors"
+    return resolve_output_asset(
+        output_directory, relative.parent / filename, ".safetensors"
+    )
+
+
 def _copy_atomic(source, destination):
     source = Path(source).resolve()
     destination = Path(destination).resolve()

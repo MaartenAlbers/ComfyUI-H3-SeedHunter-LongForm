@@ -8,7 +8,13 @@ import folder_paths
 from server import PromptServer
 
 from .seedhunter_nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-from .project_state import create_project, project_snapshot
+from .project_state import (
+    accept_clip,
+    create_project,
+    project_snapshot,
+    resolve_context_checkpoint,
+    resolve_output_asset,
+)
 
 
 @PromptServer.instance.routes.post("/seedhunter/latest_output")
@@ -85,6 +91,37 @@ async def load_seedhunter_project(request):
         data = await request.json()
         name = str(data.get("project_name", ""))
         return web.json_response(project_snapshot(folder_paths.get_output_directory(), name))
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except (ValueError, OSError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+
+@PromptServer.instance.routes.post("/seedhunter/project/accept")
+async def accept_seedhunter_project_clip(request):
+    """Commit the rendered MP4 and its matching H3 latent as one clip pair."""
+    try:
+        data = await request.json()
+        output = folder_paths.get_output_directory()
+        clip_index = int(data.get("clip_index", 0))
+        video = resolve_output_asset(output, data.get("video_path", ""), ".mp4")
+        context = resolve_context_checkpoint(
+            output, data.get("context_prefix", ""), clip_index
+        )
+        snapshot = accept_clip(
+            output,
+            str(data.get("project_name", "")),
+            str(data.get("project_token", "")),
+            clip_index,
+            video,
+            context,
+            str(data.get("prompt", "")),
+            int(data.get("frame_count", 0)),
+            int(data.get("overlap_frames", 0)),
+            str(data.get("audio_mode", "")),
+            float(data.get("fps", 24.0)),
+        )
+        return web.json_response(snapshot)
     except FileNotFoundError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except (ValueError, OSError) as exc:

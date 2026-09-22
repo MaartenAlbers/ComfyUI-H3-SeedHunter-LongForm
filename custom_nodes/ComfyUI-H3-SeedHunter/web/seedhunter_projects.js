@@ -34,6 +34,45 @@ async function requestProject(action, projectName) {
     return result;
 }
 
+function latestOutput(node) {
+    const preview = node?.widgets?.find((item) => item.name === "videopreview");
+    const params = preview?.value?.params || preview?.options?.params;
+    if (!params?.filename && !params?.fullpath) return null;
+    const relative = params.subfolder ? `${params.subfolder}/${params.filename}` : params.filename;
+    return {
+        path: params.fullpath || relative,
+        filename: params.filename,
+        subfolder: params.subfolder || "",
+    };
+}
+
+async function resolvedOutput(node) {
+    const visible = latestOutput(node);
+    if (visible) return visible;
+    const filenamePrefix = widget(node, "filename_prefix")?.value;
+    if (!filenamePrefix) throw new Error("No rendered output was found.");
+    const response = await fetch("/seedhunter/latest_output", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename_prefix: filenamePrefix }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not find the latest output.");
+    return result;
+}
+
+function validH3Frames(seconds) {
+    const requested = Math.max(5, Math.round(Number(seconds) * 24));
+    return requested + ((5 - (requested % 17)) % 17);
+}
+
+function valueOfNode(type, titlePart, widgetName) {
+    const node = findNode((item) =>
+        item.type === type && (!titlePart || (item.title || "").includes(titlePart))
+    );
+    return widget(node, widgetName)?.value ?? node?.widgets?.[0]?.value;
+}
+
 function applySnapshot(node, snapshot) {
     node.properties ||= {};
     node.properties.seedhunter_project = snapshot;
@@ -72,6 +111,72 @@ async function perform(node, action) {
     notify(action === "create" ? `Created ${snapshot.status}` : `Loaded ${snapshot.status}`);
 }
 
+function singlePassIsActive() {
+    const control = findNode((item) => item.type === "H3SeedHunterSinglePassControl");
+    return control?.properties?.seedhunter_mode === "single";
+}
+
+async function acceptRenderedClip(outputNode) {
+    const projectNode = findNode((item) => item.type === TYPE);
+    const project = projectNode?.properties?.seedhunter_project;
+    if (!project?.project_token) throw new Error("Create or load a project first.");
+
+    const singlePassOutput = (outputNode.title || "").includes("HYBRID PREVIEW 1");
+    if (singlePassOutput && !singlePassIsActive()) {
+        throw new Error("Preview 1 can only be accepted while Single Pass Mode is active.");
+    }
+    const contextSave = findNode((item) => item.type === "MiniMaxH3MotionContextSaveLatent" && (
+        singlePassOutput
+            ? (item.title || "").includes("SAVE SINGLE PASS CONTEXT")
+            : (item.title || "").includes("ARCHIVE ACCEPTED FINAL CHECKPOINT")
+    ));
+    if (!contextSave) throw new Error("The matching context-save node was not found.");
+
+    const output = await resolvedOutput(outputNode);
+    const clipIndex = Number(valueOfNode("PrimitiveInt", "NEXT CLIP NUMBER", "value"));
+    const seconds = Number(valueOfNode("PrimitiveFloat", "Number of seconds clip", "value"));
+    const contextLength = Number(valueOfNode("H3SeedHunterAVContext", "PREVIEW", "context_length") || 39);
+    const prompt = String(valueOfNode("MiniMaxH3ReferenceToVideo", "ROLLING CLIP", "prompt") || "");
+    const audioMode = String(valueOfNode("H3SeedHunterAudioRouter", "AUDIO MODE", "audio_mode") || "");
+    const fps = Number(widget(outputNode, "frame_rate")?.value || 24);
+    const contextPrefix = String(widget(contextSave, "filename_prefix")?.value || contextSave.widgets?.[0]?.value || "");
+
+    if (!Number.isInteger(clipIndex) || clipIndex < 1) throw new Error("Invalid next clip number.");
+    if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("Invalid clip duration.");
+    if (!contextPrefix) throw new Error("Context checkpoint prefix is missing.");
+
+    const response = await fetch("/seedhunter/project/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            project_name: String(widget(projectNode, "project_name")?.value || ""),
+            project_token: project.project_token,
+            clip_index: clipIndex,
+            video_path: output.path,
+            context_prefix: contextPrefix,
+            prompt,
+            frame_count: validH3Frames(seconds),
+            overlap_frames: clipIndex === 1 ? 0 : contextLength,
+            audio_mode: audioMode,
+            fps,
+        }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not accept the clip.");
+    applySnapshot(projectNode, result);
+    notify(`Accepted clip ${clipIndex}; project now expects clip ${result.next_clip_index}.`);
+}
+
+function installAcceptButton(node) {
+    if (node.type !== "VHS_VideoCombine" || widget(node, "ACCEPT CURRENT CLIP INTO PROJECT")) return;
+    const title = node.title || "";
+    if (!title.includes("FINAL SELECTED CLIP") && !title.includes("HYBRID PREVIEW 1")) return;
+    node.addWidget("button", "ACCEPT CURRENT CLIP INTO PROJECT", null, async () => {
+        try { await acceptRenderedClip(node); }
+        catch (error) { alert(`SeedHunter Project: ${error.message}`); }
+    });
+}
+
 function install(node) {
     if (node.type !== TYPE || widget(node, "CREATE NEW PROJECT")) return;
     node.properties ||= {};
@@ -93,9 +198,12 @@ function install(node) {
 
 app.registerExtension({
     name: "SeedHunter.ProjectControls",
-    async nodeCreated(node) { install(node); },
-    async loadedGraphNode(node) { install(node); },
+    async nodeCreated(node) { install(node); installAcceptButton(node); },
+    async loadedGraphNode(node) { install(node); installAcceptButton(node); },
     async afterConfigureGraph() {
-        for (const node of app.graph?._nodes || []) install(node);
+        for (const node of app.graph?._nodes || []) {
+            install(node);
+            installAcceptButton(node);
+        }
     },
 });

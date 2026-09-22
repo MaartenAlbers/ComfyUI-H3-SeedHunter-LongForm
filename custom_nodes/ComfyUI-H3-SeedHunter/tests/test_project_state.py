@@ -118,6 +118,24 @@ class ProjectStateTests(unittest.TestCase):
                 video, context, "", 243, 0, "locked audio", 24.0,
             )
 
+    def test_output_asset_and_context_checkpoint_resolution(self):
+        checkpoint = self.output / "h3_resume" / "chain" / "clip_00003.safetensors"
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_bytes(b"latent")
+        resolved = project_state.resolve_context_checkpoint(
+            self.output, "h3_resume/chain/clip", 3
+        )
+        self.assertEqual(resolved, checkpoint.resolve())
+
+    def test_output_asset_cannot_escape_output(self):
+        outside = self.output.parent / "outside.mp4"
+        outside.write_bytes(b"video")
+        try:
+            with self.assertRaisesRegex(ValueError, "outside"):
+                project_state.resolve_output_asset(self.output, outside, ".mp4")
+        finally:
+            outside.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()
