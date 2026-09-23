@@ -116,7 +116,10 @@ function armFinalPass(chooser) {
     chooser.properties.seedhunter_preview_output_modes = Object.fromEntries(
         previewOutputNodes().map((node) => [String(node.id), Number(node.mode ?? NORMAL)])
     );
-    for (const node of previewOutputNodes()) setMode(node, BYPASS);
+    for (const node of previewOutputNodes()) {
+        const isSelected = (node.title || "").includes(`HYBRID PREVIEW ${selected}`);
+        setMode(node, isSelected ? NORMAL : BYPASS);
+    }
     const finalOutput = findNode("FINAL SELECTED CLIP");
     if (!finalOutput) throw new Error("The final selected clip output was not found.");
     setMode(finalOutput, NORMAL);
