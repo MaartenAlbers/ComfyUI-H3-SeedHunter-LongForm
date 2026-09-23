@@ -370,6 +370,11 @@ function collectProjectSettings() {
 }
 
 function applyProjectSettings(snapshot) {
+    const control = findNode((item) => item.type === "H3SeedHunterSinglePassControl");
+    if (control && Number(snapshot?.next_clip_index || 1) <= 1) {
+        control.properties ||= {};
+        control.properties.seedhunter_project_aspect_locked = "";
+    }
     const settings = snapshot?.workflow_settings;
     if (!settings || !Object.keys(settings).length) return;
     const duration = findNode((item) =>
@@ -385,7 +390,6 @@ function applyProjectSettings(snapshot) {
         setWidget(context, "context_length", Number(settings.context_frames));
     }
 
-    const control = findNode((item) => item.type === "H3SeedHunterSinglePassControl");
     if (control) {
         control.properties ||= {};
         control.properties.seedhunter_project_aspect_locked = "";
