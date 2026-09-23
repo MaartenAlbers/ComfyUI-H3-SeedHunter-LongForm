@@ -23,6 +23,15 @@ function setWidget(node, name, value) {
     node.setDirtyCanvas?.(true, true);
 }
 
+function setReadOnlyWidget(item, label = null) {
+    if (!item) return;
+    if (label) item.label = label;
+    item.disabled = true;
+    item.options ||= {};
+    item.options.disabled = true;
+    if (item.inputEl) item.inputEl.readOnly = true;
+}
+
 function findNode(predicate) {
     return (app.graph?._nodes || []).find(predicate);
 }
@@ -445,13 +454,19 @@ function applySnapshot(node, snapshot) {
         setWidget(source, "start_mode", extending ? "extend video" : "new clip");
         setWidget(source, "video", extending ? snapshot.previous_clip_video : "");
         setWidget(source, "use_source_audio", true);
-        let sourceStatus = widget(source, "PROJECT SOURCE VIDEO");
-        if (!sourceStatus) {
-            sourceStatus = source.addWidget(
-                "text", "PROJECT SOURCE VIDEO", "new clip", () => {}, { serialize: false }
+        const videoField = widget(source, "video");
+        setReadOnlyWidget(videoField, "PROJECT SOURCE — MANIFEST CONTROLLED");
+        const legacyStatus = widget(source, "PROJECT SOURCE VIDEO");
+        if (legacyStatus) {
+            legacyStatus.type = "hidden";
+            legacyStatus.computeSize = () => [0, -4];
+        } else if (!videoField) {
+            const sourceStatus = source.addWidget(
+                "text", "PROJECT SOURCE — MANIFEST CONTROLLED", "new clip", () => {}, { serialize: false }
             );
+            sourceStatus.value = extending ? snapshot.previous_clip_video : "new clip";
+            setReadOnlyWidget(sourceStatus);
         }
-        sourceStatus.value = extending ? snapshot.previous_clip_video : "new clip";
         const preview = ensureSourcePreview(source);
         if (preview) {
             if (extending) {
