@@ -71,6 +71,19 @@ function previewOutputNodes() {
 }
 
 function selectedPreviewNumber() {
+    const chooser = findNode(FINAL_PASS_CHOOSER) || findNode("FINAL PASS ARMED");
+    const enabled = (value) => value === true || value === 1 || ["yes", "true", "on"].includes(String(value).toLowerCase());
+    const chooserSelection = [1, 2, 3].find((number) => {
+        const field = chooser?.widgets?.find((item) => (item.name || "").includes(`SELECT PREVIEW ${number}`));
+        return field && enabled(field.value);
+    });
+    if (chooserSelection) {
+        for (const number of [1, 2, 3]) {
+            const selector = findNode(`PREVIEW ${number} SELECTED`);
+            if (selector) setMode(selector, number === chooserSelection ? NORMAL : BYPASS);
+        }
+        return chooserSelection;
+    }
     const selected = (app.graph?._nodes || []).find((node) =>
         /^PREVIEW [123] SELECTED$/.test(node.title || "") && Number(node.mode ?? NORMAL) !== BYPASS
     );
