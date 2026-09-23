@@ -77,7 +77,7 @@ Inspect the result, update `CHANGELOG.md`, test it in a clean ComfyUI session an
 
 ## Credits
 
-- Workflow development and testing: [Fox•Fur•Essence](https://www.youtube.com/@foxfuressence)
+- Original Workflow development and testing: [Fox•Fur•Essence](https://www.youtube.com/@foxfuressence)
 - Motion-context foundation: [Seitanism / ComfyUI-H3-Motion-Context-MultiRef](https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef)
 
 ## License
