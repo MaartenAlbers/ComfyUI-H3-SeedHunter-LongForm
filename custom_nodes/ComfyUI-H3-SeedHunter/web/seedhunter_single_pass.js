@@ -49,6 +49,22 @@ function nodesInControlledGroups() {
     return [...found.values()];
 }
 
+function nodesInGroup(titlePart) {
+    const found = new Map();
+    for (const group of app.graph?._groups || []) {
+        if (!(group.title || "").includes(titlePart)) continue;
+        const bounds = groupBounds(group);
+        if (!bounds) continue;
+        const [x, y, width, height] = bounds;
+        for (const node of app.graph?._nodes || []) {
+            const cx = Number(node.pos?.[0] || 0) + Number(node.size?.[0] || 0) / 2;
+            const cy = Number(node.pos?.[1] || 0) + Number(node.size?.[1] || 0) / 2;
+            if (cx >= x && cx <= x + width && cy >= y && cy <= y + height) found.set(String(node.id), node);
+        }
+    }
+    return [...found.values()];
+}
+
 function controlledNodes() {
     const found = new Map();
     for (const title of PREVIEW_OUTPUTS) {
@@ -70,12 +86,15 @@ function previewOutputNodes() {
     return PREVIEW_OUTPUTS.map(findNode).filter(Boolean);
 }
 
+function enabledValue(value) {
+    return value === true || value === 1 || ["yes", "true", "on"].includes(String(value).toLowerCase());
+}
+
 function selectedPreviewNumber() {
     const chooser = findNode(FINAL_PASS_CHOOSER) || findNode("FINAL PASS ARMED");
-    const enabled = (value) => value === true || value === 1 || ["yes", "true", "on"].includes(String(value).toLowerCase());
     const chooserSelection = [1, 2, 3].find((number) => {
         const field = chooser?.widgets?.find((item) => (item.name || "").includes(`SELECT PREVIEW ${number}`));
-        return field && enabled(field.value);
+        return field && enabledValue(field.value);
     });
     if (chooserSelection) {
         for (const number of [1, 2, 3]) {
@@ -96,13 +115,39 @@ function finalPassEnabled() {
     return Boolean(sampler && Number(sampler.mode ?? NORMAL) !== BYPASS);
 }
 
+function syncFinalControllerState() {
+    const controller = findNode("ENABLE FINAL 1.5 MP PASS");
+    const field = controller?.widgets?.find((item) => (item.name || "").includes("HYBRID FINAL UPSCALE PASS"));
+    if (!field) return;
+    const signature = String(field.value).toLowerCase();
+    if (controller.seedhunterAppliedFinalValue === signature) return;
+    const mode = enabledValue(field.value) ? NORMAL : BYPASS;
+    for (const node of nodesInGroup("HYBRID FINAL UPSCALE PASS")) {
+        if (Number(node.mode ?? NORMAL) !== mode) setMode(node, mode);
+    }
+    controller.seedhunterAppliedFinalValue = signature;
+}
+
+function applySelectedPreviewOutputs() {
+    const selected = selectedPreviewNumber();
+    if (!selected) return null;
+    for (const node of previewOutputNodes()) {
+        const isSelected = (node.title || "").includes(`HYBRID PREVIEW ${selected}`);
+        setMode(node, isSelected ? NORMAL : BYPASS);
+    }
+    return selected;
+}
+
 function syncFinalPassRouting() {
+    syncFinalControllerState();
     const chooser = findNode(FINAL_PASS_CHOOSER) || findNode("FINAL PASS ARMED");
     if (!chooser) return;
     const armed = Boolean(chooser.properties?.seedhunter_final_pass_armed);
     if (finalPassEnabled() && !armed) {
         try { armFinalPass(chooser); }
         catch (error) { console.warn("[SeedHunter] Could not arm final pass:", error); }
+    } else if (finalPassEnabled() && armed) {
+        applySelectedPreviewOutputs();
     } else if (!finalPassEnabled() && armed) {
         restorePreviewOutputs(chooser);
     }
