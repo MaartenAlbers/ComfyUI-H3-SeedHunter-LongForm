@@ -7,6 +7,12 @@ const EXPORT_MODES = {
     "Delivery MP4 — H.264": "delivery_mp4",
     "Master MOV — ProRes 422 HQ": "master_prores",
 };
+const DELIVERY_QUALITIES = {
+    "Maximum — CRF 14": 14,
+    "High — CRF 18": 18,
+    "Balanced — CRF 21": 21,
+    "Compact — CRF 24": 24,
+};
 
 function widget(node, name) {
     return node?.widgets?.find((item) => item.name === name);
@@ -66,20 +72,21 @@ function timelinePreviewHost(projectNode) {
 function exportSettings(projectNode) {
     const host = timelinePreviewHost(projectNode);
     const label = String(widget(host, "export_mode")?.value || Object.keys(EXPORT_MODES)[0]);
+    const quality = String(widget(host, "delivery_quality")?.value || "High — CRF 18");
     return {
         mode: EXPORT_MODES[label] || "delivery_mp4",
         filename: String(widget(host, "filename")?.value || "").trim(),
-        crf: Number(widget(host, "delivery_crf")?.value ?? 18),
+        crf: DELIVERY_QUALITIES[quality] ?? 18,
     };
 }
 
 function refreshExportWidgets(host) {
     const master = EXPORT_MODES[String(widget(host, "export_mode")?.value)] === "master_prores";
-    const crf = widget(host, "delivery_crf");
-    if (crf) {
-        crf.disabled = master;
-        crf.options ||= {};
-        crf.options.disabled = master;
+    const quality = widget(host, "delivery_quality");
+    if (quality) {
+        quality.disabled = master;
+        quality.options ||= {};
+        quality.options.disabled = master;
     }
     host.setDirtyCanvas?.(true, true);
 }
@@ -87,7 +94,7 @@ function refreshExportWidgets(host) {
 function installTimelineExport(projectNode) {
     const host = timelinePreviewHost(projectNode);
     if (!host || host === projectNode || typeof host.addWidget !== "function") return host;
-    const keep = new Set(["export_mode", "filename", "delivery_crf", "ASSEMBLE / RE-ASSEMBLE ACTIVE TIMELINE"]);
+    const keep = new Set(["export_mode", "filename", "delivery_quality", "ASSEMBLE / RE-ASSEMBLE ACTIVE TIMELINE"]);
     for (const item of host.widgets || []) {
         if (keep.has(item.name) || item.name === "ASSEMBLED TIMELINE PREVIEW") continue;
         item.type = "hidden";
@@ -97,10 +104,19 @@ function installTimelineExport(projectNode) {
         host.addWidget("combo", "export_mode", Object.keys(EXPORT_MODES)[0], () => refreshExportWidgets(host), {
             values: Object.keys(EXPORT_MODES), serialize: false,
         });
+    }
+    if (!widget(host, "filename")) {
         host.addWidget("text", "filename", "", null, {serialize: false});
-        host.addWidget("number", "delivery_crf", 18, null, {
-            min: 0, max: 30, step: 1, precision: 0, serialize: false,
+    }
+    if (!widget(host, "delivery_quality")) {
+        const legacyCrf = Number(widget(host, "delivery_crf")?.value ?? 18);
+        const initial = Object.entries(DELIVERY_QUALITIES).find(([, value]) => value === legacyCrf)?.[0]
+            || "High — CRF 18";
+        host.addWidget("combo", "delivery_quality", initial, () => refreshExportWidgets(host), {
+            values: Object.keys(DELIVERY_QUALITIES), serialize: false,
         });
+    }
+    if (!widget(host, "ASSEMBLE / RE-ASSEMBLE ACTIVE TIMELINE")) {
         host.addWidget("button", "ASSEMBLE / RE-ASSEMBLE ACTIVE TIMELINE", null, async () => {
             try { await assembleCurrentProject(projectNode); }
             catch (error) { alert(`SeedHunter Project: ${error.message}`); }
@@ -118,7 +134,11 @@ function applyExportSettings(projectNode, settings) {
     const label = Object.entries(EXPORT_MODES).find(([, value]) => value === settings.mode)?.[0];
     if (label) setWidget(host, "export_mode", label);
     if (settings.filename !== undefined) setWidget(host, "filename", String(settings.filename));
-    if (settings.crf !== undefined) setWidget(host, "delivery_crf", Number(settings.crf));
+    if (settings.crf !== undefined) {
+        const quality = Object.entries(DELIVERY_QUALITIES).find(([, value]) => value === Number(settings.crf))?.[0]
+            || "High — CRF 18";
+        setWidget(host, "delivery_quality", quality);
+    }
     refreshExportWidgets(host);
 }
 
