@@ -107,6 +107,8 @@ function installTimelineExport(projectNode) {
         }, {serialize: false});
     }
     refreshExportWidgets(host);
+    host.size[0] = Math.max(Number(host.size?.[0] || 0), 690);
+    host.size[1] = Math.max(Number(host.size?.[1] || 0), 300);
     return host;
 }
 
@@ -681,6 +683,11 @@ function install(node) {
     lockProjectContextPrefixes();
     if (widget(node, "CREATE NEW PROJECT")) {
         refreshProjectSelector(node).catch((error) => console.warn("[SeedHunter]", error));
+        installTimelineExport(node);
+        ensureTimelinePreview(node);
+        disableLegacyAssembly();
+        const saved = node.properties?.seedhunter_project;
+        if (saved?.status) applySnapshot(node, saved);
         return;
     }
     node.properties ||= {};
