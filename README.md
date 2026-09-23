@@ -6,7 +6,7 @@ An experimental ComfyUI workflow for generating several MiniMax H3 preview candi
 
 Download the latest release package from the repository's **Releases** page. The workflow file is:
 
-`H3_SeedHunter_Long_Form_Video_v1.3.1.json`
+`Maartificial_H3_SeedHunter_Long_Form_Video_v1.4.json`
 
 Models and example media are not included.
 
@@ -18,6 +18,9 @@ Models and example media are not included.
 - Automatic motion/audio-context checkpoint saving for Single Pass Mode, so Locked Audio can continue into the next clip.
 - Seamless audiovisual continuation with protected overlap.
 - Locked soundtrack, audio-reference and generated-audio modes.
+- Persistent project folders with resumable prompts, references, settings and accepted clips.
+- Non-destructive rollback and branching from any accepted clip.
+- Active-timeline assembly with delivery MP4 and ProRes master export modes.
 - Optional low-VRAM and sparse-attention controls.
 
 ## Installation
@@ -26,7 +29,7 @@ Models and example media are not included.
 2. Install the external custom-node dependencies below, preferably with ComfyUI Manager.
 3. Download the required MiniMax H3 models.
 4. Restart ComfyUI.
-5. Load `H3_SeedHunter_Long_Form_Video_v1.3.1.json`.
+5. Load `Maartificial_H3_SeedHunter_Long_Form_Video_v1.4.json`.
 6. Replace the empty image, audio and optional source-video inputs before running.
 7. Read [GUIDE.md](GUIDE.md), especially the preview-selection and extension sections.
 

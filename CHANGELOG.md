@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.0 — 2026-09-23
+
+- Added persistent project creation, loading, switching and project-specific workflow state.
+- Added accepted-clip history, active-timeline tracking and non-destructive rollback/branching.
+- Added manifest-controlled continuation sources, clip numbers and saved audiovisual context.
+- Added automatic restoration of prompts, reference images, format, run mode and final-pass controls.
+- Separated aspect ratio from preview, Single Pass and final-pass resolution settings.
+- Added active-timeline assembly with Delivery MP4 and ProRes 422 HQ master exports.
+- Added optional rgthree Power LoRA Loader integration.
+- Added in-workflow project, render-control and continuation documentation.
+- Removed personal project state, media paths, test prompts and stale output previews from the public workflow.
+
 ## 1.3.1 — 2026-09-21
 
 - Added a dedicated Preview 1 motion/audio-context checkpoint save for Single Pass Mode.
