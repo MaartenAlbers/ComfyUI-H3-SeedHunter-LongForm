@@ -78,10 +78,28 @@ function selectedPreviewNumber() {
     return match ? Number(match[1]) : null;
 }
 
+function finalPassEnabled() {
+    const sampler = findNode("FINAL PASS —");
+    return Boolean(sampler && Number(sampler.mode ?? NORMAL) !== BYPASS);
+}
+
+function syncFinalPassRouting() {
+    const chooser = findNode(FINAL_PASS_CHOOSER) || findNode("FINAL PASS ARMED");
+    if (!chooser) return;
+    const armed = Boolean(chooser.properties?.seedhunter_final_pass_armed);
+    if (finalPassEnabled() && !armed) {
+        try { armFinalPass(chooser); }
+        catch (error) { console.warn("[SeedHunter] Could not arm final pass:", error); }
+    } else if (!finalPassEnabled() && armed) {
+        restorePreviewOutputs(chooser);
+    }
+}
+
 function armFinalPass(chooser) {
     const selected = selectedPreviewNumber();
     if (!selected) throw new Error("Choose Preview 1, 2, or 3 first.");
     chooser.properties ||= {};
+    chooser.properties.seedhunter_final_pass_armed = true;
     chooser.properties.seedhunter_preview_output_modes = Object.fromEntries(
         previewOutputNodes().map((node) => [String(node.id), Number(node.mode ?? NORMAL)])
     );
@@ -102,6 +120,7 @@ function restorePreviewOutputs(chooser) {
         setMode(node, Object.prototype.hasOwnProperty.call(saved, String(node.id)) ? saved[String(node.id)] : NORMAL);
     }
     chooser.properties ||= {};
+    chooser.properties.seedhunter_final_pass_armed = false;
     chooser.properties.seedhunter_preview_output_modes = {};
     chooser.title = FINAL_PASS_CHOOSER;
     chooser.color = "#f66744";
@@ -343,6 +362,10 @@ app.registerExtension({
                 syncActiveResolution(node);
                 setStatus(node, node.properties?.seedhunter_mode === "single" ? "single" : "preview");
             }
+        }
+        syncFinalPassRouting();
+        if (!window.seedhunterFinalPassRoutingTimer) {
+            window.seedhunterFinalPassRoutingTimer = window.setInterval(syncFinalPassRouting, 400);
         }
     },
 });
