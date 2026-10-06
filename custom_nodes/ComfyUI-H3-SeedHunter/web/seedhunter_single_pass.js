@@ -169,8 +169,6 @@ function armFinalPass(chooser) {
     if (!finalOutput) throw new Error("The final selected clip output was not found.");
     setMode(finalOutput, NORMAL);
     chooser.title = `FINAL PASS ARMED — PREVIEW ${selected} ONLY`;
-    chooser.color = "#c16d18";
-    chooser.bgcolor = "#3d2715";
     chooser.setDirtyCanvas?.(true, true);
     notify(`Final Pass armed. Only Preview ${selected} can be evaluated.`);
 }
@@ -184,8 +182,6 @@ function restorePreviewOutputs(chooser) {
     chooser.properties.seedhunter_final_pass_armed = false;
     chooser.properties.seedhunter_preview_output_modes = {};
     chooser.title = FINAL_PASS_CHOOSER;
-    chooser.color = "#f66744";
-    chooser.bgcolor = "#181414";
     chooser.setDirtyCanvas?.(true, true);
     notify("Preview output nodes restored.");
 }
@@ -201,6 +197,10 @@ function installFinalPassControl(node) {
     }, {serialize: false});
     arm.serializeValue = () => undefined;
     restore.serializeValue = () => undefined;
+    for (const item of node.widgets || []) {
+        if (item.type === "hidden") continue;
+        item.computeSize = (width) => [width, 23];
+    }
     node.size[0] = Math.max(Number(node.size?.[0] || 0), 450);
     node.size[1] = Math.max(Number(node.size?.[1] || 0), 180);
 }
@@ -302,11 +302,24 @@ function setStatus(control, mode) {
     const aspect = aspectRatio(control).split(" ")[0];
     const finalMp = Number(widget(control, "final_pass_megapixels")?.value || 1.5);
     control.title = `FORMAT: ${aspect} — ${label} ${mp} MP — FINAL ${finalMp} MP`;
-    control.color = mode === "single" ? "#c16d18" : "#7f9431";
-    control.bgcolor = mode === "single" ? "#3d2715" : "#343b22";
     control.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
     window.dispatchEvent(new CustomEvent("seedhunter-mode-changed", {detail: {mode}}));
+}
+
+function normalizeFormatAppearance(control) {
+    const legacyColors = new Set([
+        "#7f9431|#343b22",
+        "#c16d18|#3d2715",
+    ]);
+    if (legacyColors.has(`${control.color}|${control.bgcolor}`)) {
+        control.color = "#f66744";
+        control.bgcolor = "#181414";
+    }
+    for (const item of control.widgets || []) {
+        if (item.type === "hidden") continue;
+        item.computeSize = (width) => [width, 23];
+    }
 }
 
 function normalizeFormatWidgets(control) {
@@ -403,6 +416,7 @@ function install(node) {
     node.properties.seedhunter_mode ||= "preview";
     normalizeFormatWidgets(node);
     installButtons(node);
+    normalizeFormatAppearance(node);
     bindResolutionWidget(node, "preview_megapixels", "preview");
     bindResolutionWidget(node, "single_pass_megapixels", "single");
     bindFormatWidgets(node);

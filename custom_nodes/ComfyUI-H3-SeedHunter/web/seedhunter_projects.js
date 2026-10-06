@@ -13,9 +13,26 @@ const DELIVERY_QUALITIES = {
     "Balanced — CRF 21": 21,
     "Compact — CRF 24": 24,
 };
-
 function widget(node, name) {
     return node?.widgets?.find((item) => item.name === name);
+}
+
+function ensureWidgetSpacing(node) {
+    if (!Array.isArray(node?.widgets)) return;
+    for (const item of node.widgets) {
+        if (item.type === "hidden") continue;
+        // DOM/media widgets own their height. Treating them like 23 px controls
+        // overwrites their computeSize() and collapses video previews.
+        if (["ASSEMBLED TIMELINE PREVIEW", "PROJECT SOURCE PREVIEW", "videopreview", "audiopreview"].includes(item.name)) continue;
+        if (["video", "preview"].includes(item.type)) continue;
+        item.computeSize = (width) => [width, 23];
+    }
+}
+
+function migrateForcedSeedHunterColor(node) {
+    if (node?.color !== "#346b6d" || node?.bgcolor !== "#203b3c") return;
+    node.color = "#f66744";
+    node.bgcolor = "#181414";
 }
 
 function setWidget(node, name, value) {
@@ -122,6 +139,7 @@ function installTimelineExport(projectNode) {
             catch (error) { alert(`SeedHunter Project: ${error.message}`); }
         }, {serialize: false});
     }
+    ensureWidgetSpacing(host);
     refreshExportWidgets(host);
     host.size[0] = Math.max(Number(host.size?.[0] || 0), 690);
     host.size[1] = Math.max(Number(host.size?.[1] || 0), 300);
@@ -149,10 +167,12 @@ function ensureTimelinePreview(projectNode) {
     if (node.seedhunterTimelineVideoElement) return node.seedhunterTimelineVideoElement;
     if (typeof node.addDOMWidget !== "function") return null;
     if (node !== projectNode) {
-        node.mode = 4;
+        migrateForcedSeedHunterColor(node);
+        // This reused VHS node is now a frontend-only control/preview surface.
+        // Keep it interactive while excluding it from normal prompt execution.
+        node.isVirtualNode = true;
+        node.mode = 0;
         node.title = "ASSEMBLED ACTIVE TIMELINE — PREVIEW ONLY";
-        node.color = "#346b6d";
-        node.bgcolor = "#203b3c";
         const oldPreview = widget(node, "videopreview");
         if (oldPreview?.value) {
             oldPreview.value.hidden = true;
@@ -168,11 +188,21 @@ function ensureTimelinePreview(projectNode) {
     video.style.background = "#111";
     video.style.borderRadius = "6px";
     video.style.display = "none";
-    node.addDOMWidget("ASSEMBLED TIMELINE PREVIEW", "video", video, {
+    const previewWidget = node.addDOMWidget("ASSEMBLED TIMELINE PREVIEW", "video", video, {
         serialize: false,
         hideOnZoom: false,
-        getMinHeight: () => video.style.display === "none" ? 0 : 520,
+        // ComfyUI caches the DOM row height while the video is still hidden.
+        // A dynamic 0/520 value therefore leaves the loaded preview in a 7 px row.
+        getMinHeight: () => 520,
+        getMaxHeight: () => 720,
     });
+    // VHS still uses LiteGraph's legacy widget sizing path, which ignores
+    // getMinHeight(). Supply computeSize as well so the DOM row is not 7 px.
+    previewWidget.computeSize = function(width) {
+        const height = video.style.display === "none" ? -4 : 520;
+        this.computedHeight = height;
+        return [width, height];
+    };
     node.seedhunterTimelineVideoElement = video;
     return video;
 }
@@ -184,14 +214,16 @@ function disableLegacyAssembly() {
         const title = node.title || "";
         if (node.type === "H3SeedHunterAssemble" || title.includes("FULL SEAMLESS VIDEO") ||
             node.properties?.seedhunter_timeline_preview) {
-            node.mode = 4;
             node.properties ||= {};
             node.properties.seedhunter_project_legacy_disabled = true;
             if (title.includes("FULL SEAMLESS VIDEO") || node.properties.seedhunter_timeline_preview) {
                 node.properties.seedhunter_timeline_preview = true;
+                node.isVirtualNode = true;
+                node.mode = 0;
                 node.title = "ASSEMBLED ACTIVE TIMELINE — PREVIEW ONLY";
-                node.color = "#346b6d";
-                node.bgcolor = "#203b3c";
+                migrateForcedSeedHunterColor(node);
+            } else {
+                node.mode = 4;
             }
             node.setDirtyCanvas?.(true, true);
         }
@@ -201,6 +233,7 @@ function disableLegacyAssembly() {
 function updateClipDisplay(snapshot) {
     const display = findNode((item) => item.type === "H3SeedHunterProjectClipIndex");
     if (!display) return;
+    migrateForcedSeedHunterColor(display);
     let status = widget(display, "CURRENT PROJECT CLIP");
     if (!status) {
         status = display.addWidget(
@@ -209,8 +242,6 @@ function updateClipDisplay(snapshot) {
     }
     status.value = String(snapshot.next_clip_index);
     display.title = `CURRENT PROJECT CLIP — ${snapshot.next_clip_index} (MANIFEST CONTROLLED)`;
-    display.color = "#346b6d";
-    display.bgcolor = "#203b3c";
     display.size[0] = Math.max(Number(display.size?.[0] || 0), 530);
     display.size[1] = Math.max(Number(display.size?.[1] || 0), 100);
     display.setDirtyCanvas?.(true, true);
@@ -437,8 +468,6 @@ function applySnapshot(node, snapshot) {
     const status = widget(node, "PROJECT STATUS");
     if (status) status.value = snapshot.status;
     node.title = `PROJECT — ${snapshot.status}`;
-    node.color = "#346b6d";
-    node.bgcolor = "#203b3c";
     const timelinePreview = ensureTimelinePreview(node);
     if (timelinePreview) {
         if (snapshot.final_render) {
@@ -447,8 +476,11 @@ function applySnapshot(node, snapshot) {
             timelinePreview.style.display = "block";
             timelinePreview.load();
             const previewHost = timelinePreviewHost(node);
-            previewHost.size[0] = Math.max(Number(previewHost.size?.[0] || 0), 690);
-            previewHost.size[1] = Math.max(Number(previewHost.size?.[1] || 0), 760);
+            const previewWidth = Math.max(Number(previewHost.size?.[0] || 0), 690);
+            const previewHeight = Math.max(Number(previewHost.size?.[1] || 0), 760);
+            previewHost.setSize?.([previewWidth, previewHeight]);
+            if (!previewHost.setSize) previewHost.size = [previewWidth, previewHeight];
+            previewHost.onResize?.(previewHost.size);
             previewHost.setDirtyCanvas?.(true, true);
         } else {
             timelinePreview.pause();
@@ -458,7 +490,8 @@ function applySnapshot(node, snapshot) {
     }
 
     const clipNumber = findNode((item) =>
-        (item.title || "").includes("NEXT CLIP NUMBER")
+        item.type === "PrimitiveInt"
+        && (item.title || "").includes("NEXT CLIP NUMBER")
     );
     if (clipNumber) {
         const clipWidget = widget(clipNumber, "value") || clipNumber.widgets?.[0];
@@ -699,13 +732,16 @@ function refreshAcceptButtonState() {
 
 function install(node) {
     if (node.type === "H3SeedHunterProjectClipIndex") {
+        migrateForcedSeedHunterColor(node);
         const project = findNode((item) => item.type === TYPE)?.properties?.seedhunter_project;
         if (project) updateClipDisplay(project);
         return;
     }
     if (node.type !== TYPE) return;
     lockProjectContextPrefixes();
+    migrateForcedSeedHunterColor(node);
     if (widget(node, "CREATE NEW PROJECT")) {
+        ensureWidgetSpacing(node);
         refreshProjectSelector(node).catch((error) => console.warn("[SeedHunter]", error));
         installTimelineExport(node);
         ensureTimelinePreview(node);
@@ -735,6 +771,7 @@ function install(node) {
             notify(`Found ${projects.length} project(s).`);
         } catch (error) { alert(`SeedHunter Project: ${error.message}`); }
     });
+    ensureWidgetSpacing(node);
     installTimelineExport(node);
     ensureTimelinePreview(node);
     disableLegacyAssembly();

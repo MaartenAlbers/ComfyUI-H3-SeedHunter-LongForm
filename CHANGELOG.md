@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4 maintenance — 2026-10-06
+
+- Fixed assembled-timeline preview sizing and kept its export controls interactive without queueing the preview node.
+- Improved project, format and final-pass control spacing and preserved user-selected node colors.
+- Added compatibility for accepting clips saved with legacy context-checkpoint filenames.
+- Made the lazy preview selector fall back to Preview 1 when no selector is active.
+- Updated workflow layout and appearance while retaining clean public defaults, empty media inputs and a disabled hybrid final pass.
+
 ## 1.4.0 — 2026-09-23
 
 - Added persistent project creation, loading, switching and project-specific workflow state.

@@ -40,6 +40,8 @@ $formatControl.widgets_values_named = [pscustomobject]@{
     aspect_ratio = '16:9 (Widescreen)'
     final_pass_megapixels = 1.5
 }
+$formatControl.color = '#f66744'
+$formatControl.bgcolor = '#181414'
 
 if ($workflow.nodes | Where-Object type -eq 'H3SeedHunterProject') {
     throw 'The source workflow already contains an H3SeedHunterProject node.'
@@ -80,8 +82,8 @@ $project = [pscustomobject]@{
     }
     widgets_values = @('my_first_project', 'load project')
     widgets_values_named = [pscustomobject]@{ project_name='my_first_project'; action='load project' }
-    color = '#346b6d'
-    bgcolor = '#203b3c'
+    color = '#f66744'
+    bgcolor = '#181414'
 }
 
 $workflow.nodes = @($workflow.nodes) + $project
@@ -138,8 +140,8 @@ $clipDisplay = [pscustomobject]@{
         ue_properties = [pscustomobject]@{ widget_ue_connectable=[pscustomobject]@{}; input_ue_unconnectable=[pscustomobject]@{}; version='7.8' }
     }
     widgets_values = $null
-    color = '#346b6d'
-    bgcolor = '#203b3c'
+    color = '#f66744'
+    bgcolor = '#181414'
 }
 
 $avContext = $workflow.nodes | Where-Object id -eq 201

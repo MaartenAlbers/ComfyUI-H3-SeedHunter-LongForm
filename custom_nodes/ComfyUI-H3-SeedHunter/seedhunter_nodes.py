@@ -376,6 +376,10 @@ class H3SeedHunterLazyPreviewSelect:
 
     @staticmethod
     def _selected_name(select):
+        # rgthree's Any Switch returns None when no preview toggle is active.
+        # Preview 1 is the workflow default and keeps lazy evaluation deterministic.
+        if select is None:
+            select = 1
         index = int(select)
         if index not in (1, 2, 3):
             raise ValueError("Selected preview must be 1, 2, or 3.")

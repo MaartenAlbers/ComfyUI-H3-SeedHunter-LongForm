@@ -203,9 +203,16 @@ async def accept_seedhunter_project_clip(request):
         output = folder_paths.get_output_directory()
         clip_index = int(data.get("clip_index", 0))
         video = resolve_output_asset(output, data.get("video_path", ""), ".mp4")
-        context = resolve_context_checkpoint(
-            output, data.get("context_prefix", ""), clip_index
-        )
+        try:
+            context = resolve_context_checkpoint(
+                output, data.get("context_prefix", ""), clip_index
+            )
+        except FileNotFoundError:
+            # Older/cached frontend code could accidentally replace the context
+            # prefix with the clip number, producing e.g. 6_00006.safetensors
+            # in the output root. Accept that exact legacy name so an otherwise
+            # completed final pass does not need to be rendered again.
+            context = resolve_context_checkpoint(output, str(clip_index), clip_index)
         snapshot = accept_clip(
             output,
             str(data.get("project_name", "")),
