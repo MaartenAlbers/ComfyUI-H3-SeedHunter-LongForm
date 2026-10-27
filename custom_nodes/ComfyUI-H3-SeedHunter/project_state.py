@@ -232,6 +232,7 @@ def project_snapshot(output_directory, project_name):
             "index": int(clip["index"]),
             "take": int(clip.get("take", 1)),
             "active": clip["record_id"] in timeline_ids,
+            "transition_mode": clip.get("transition_mode", "continuation" if int(clip.get("overlap_frames", 0)) else "hard_cut"),
             "label": f"Clip {clip['index']} · Take {clip.get('take', 1)}",
         }
         for clip in clips
@@ -598,6 +599,7 @@ def accept_clip(
     fps=24.0,
     reference_images=None,
     workflow_settings=None,
+    transition_mode="continuation",
 ):
     data, directory = load_project(output_directory, project_name)
     expected_token = f"{data['project_id']}:{data['revision']}"
@@ -619,7 +621,11 @@ def accept_clip(
         raise ValueError("Overlap must be zero or smaller than the clip frame count.")
     if index == 1 and overlap != 0:
         raise ValueError("The first clip cannot have an incoming overlap.")
-    if index > 1 and overlap < 1:
+    if transition_mode not in ("continuation", "hard_cut"):
+        raise ValueError("Unknown clip transition mode.")
+    if transition_mode == "hard_cut" and overlap != 0:
+        raise ValueError("A hard cut must have zero incoming overlap.")
+    if index > 1 and transition_mode == "continuation" and overlap < 1:
         raise ValueError("A continuation clip must record its incoming overlap.")
     rate = float(fps)
     if rate <= 0:
@@ -653,6 +659,7 @@ def accept_clip(
         "prompt": prompt_destination.relative_to(directory).as_posix(),
         "frame_count": frames,
         "overlap_frames": overlap,
+        "transition_mode": "hard_cut" if index == 1 else transition_mode,
         "fps": rate,
         "audio_mode": str(audio_mode),
         # Preserve empty slots so Picture 3 can never shift into Picture 2.

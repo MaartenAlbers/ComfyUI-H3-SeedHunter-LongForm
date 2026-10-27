@@ -264,6 +264,58 @@ class ProjectStateTests(unittest.TestCase):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 project_state._clean_export_settings(settings)
 
+    def test_hard_cut_acceptance_and_mixed_timeline_preserve_frames(self):
+        data, directory = project_state.create_project(self.output, "Film One")
+        video = self.output / "render.mp4"
+        context = self.output / "render.safetensors"
+        video.write_bytes(b"video")
+        context.write_bytes(b"latent")
+        token = f"{data['project_id']}:1"
+        for index, overlap, mode in ((1, 0, "hard_cut"), (2, 0, "hard_cut"), (3, 39, "continuation")):
+            snapshot = project_state.accept_clip(
+                self.output, "Film One", token, index, video, context, "",
+                243, overlap, "generate audio", transition_mode=mode,
+            )
+            token = snapshot["project_token"]
+        saved, _ = project_state.load_project(self.output, "Film One")
+        self.assertEqual([r["transition_mode"] for r in saved["accepted_clips"]],
+                         ["hard_cut", "hard_cut", "continuation"])
+        commands = []
+
+        def fake_run(args, **kwargs):
+            commands.append(args)
+            Path(args[-1]).write_bytes(b"assembled")
+            return mock.Mock(returncode=0, stderr="", stdout="")
+
+        with mock.patch.object(project_state.shutil, "which", return_value="ffmpeg"), \
+                mock.patch.object(project_state.subprocess, "run", side_effect=fake_run):
+            snapshot = project_state.assemble_project(self.output, "Film One", token)
+        graph = commands[0][commands[0].index("-filter_complex") + 1]
+        self.assertIn("[0:v]trim=start_frame=0:end_frame=243", graph)
+        self.assertIn("[1:v]trim=start_frame=0:end_frame=204", graph)
+        self.assertNotIn("[0:v]trim=start_frame=204", graph)
+        self.assertEqual(graph.count("blend=all_expr"), 1)
+        self.assertRegex(graph, r"\[1:a\]aresample=32000,(?:apad,)?atrim=start=0(?:[:,])")
+        self.assertEqual(snapshot["final_frame_count"], 243 * 3 - 39)
+        self.assertAlmostEqual(snapshot["final_duration"], (243 * 3 - 39) / 24)
+
+    def test_hard_cut_rejects_overlap_and_unknown_mode(self):
+        data, _ = project_state.create_project(self.output, "Film One")
+        video = self.output / "render.mp4"
+        context = self.output / "render.safetensors"
+        video.write_bytes(b"video")
+        context.write_bytes(b"latent")
+        first = project_state.accept_clip(
+            self.output, "Film One", f"{data['project_id']}:1", 1,
+            video, context, "", 243, 0, "generate audio",
+        )
+        for mode, overlap, error in (("hard_cut", 39, "zero incoming"), ("fade", 0, "Unknown")):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, error):
+                project_state.accept_clip(
+                    self.output, "Film One", first["project_token"], 2,
+                    video, context, "", 243, overlap, "generate audio", transition_mode=mode,
+                )
+
     def test_continuation_requires_overlap(self):
         data, _ = project_state.create_project(self.output, "Film One")
         video = self.output / "render.mp4"

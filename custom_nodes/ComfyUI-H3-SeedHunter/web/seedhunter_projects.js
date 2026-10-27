@@ -510,6 +510,12 @@ function applySnapshot(node, snapshot) {
     );
     if (source) {
         const extending = Boolean(snapshot.previous_clip_video);
+        const startMode = widget(source, "start_mode");
+        if (startMode) {
+            startMode.label = "NEXT CLIP — new clip = hard cut / extend video = continuation";
+            startMode.options ||= {};
+            startMode.options.tooltip = "Choose before generating. New clip starts a new scene and keeps every frame when assembled; extend video uses the previous clip and its overlap.";
+        }
         setWidget(source, "start_mode", extending ? "extend video" : "new clip");
         setWidget(source, "video", extending ? snapshot.previous_clip_video : "");
         setWidget(source, "use_source_audio", true);
@@ -623,6 +629,14 @@ async function acceptRenderedClip(outputNode) {
     const clipIndex = Number(project.next_clip_index);
     const seconds = Number(valueOfNode("PrimitiveFloat", "Number of seconds clip", "value"));
     const contextLength = Number(valueOfNode("H3SeedHunterAVContext", "PREVIEW", "context_length") || 39);
+    const sourceNode = findNode((item) =>
+        item.type === "H3SeedHunterSourceVideo" || item.type === "H3SeedHunterSourceVideoFFmpeg"
+    );
+    const startMode = widget(sourceNode, "start_mode")?.value;
+    if (!["new clip", "extend video"].includes(startMode)) {
+        throw new Error("Choose new clip (hard cut) or extend video (continuation) on the START node.");
+    }
+    const hardCut = clipIndex === 1 || startMode === "new clip";
     const prompt = String(valueOfNode("MiniMaxH3ReferenceToVideo", "ROLLING CLIP", "prompt") || "");
     const audioMode = String(valueOfNode("H3SeedHunterAudioRouter", "AUDIO MODE", "audio_mode") || "");
     const fps = Number(widget(outputNode, "frame_rate")?.value || 24);
@@ -652,7 +666,8 @@ async function acceptRenderedClip(outputNode) {
             context_prefix: contextPrefix,
             prompt,
             frame_count: validH3Frames(seconds),
-            overlap_frames: clipIndex === 1 ? 0 : contextLength,
+            overlap_frames: hardCut ? 0 : contextLength,
+            transition_mode: hardCut ? "hard_cut" : "continuation",
             audio_mode: audioMode,
             fps,
             reference_images: referenceImages,

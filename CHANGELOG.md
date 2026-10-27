@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4 maintenance — 2026-10-27
+
+- The START node's `new clip` choice now records a hard cut when accepting a clip into the project: assembly keeps all incoming video frames and audio, with no overlap blend. `extend video` continues using the recorded overlap. After accepting a clip, the START node defaults to extending that clip again. Existing accepted clips retain their recorded overlaps.
+
 ## 1.4 maintenance — 2026-10-06
 
 - Fixed assembled-timeline preview sizing and kept its export controls interactive without queueing the preview node.

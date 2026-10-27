@@ -227,6 +227,7 @@ async def accept_seedhunter_project_clip(request):
             float(data.get("fps", 24.0)),
             data.get("reference_images", []),
             data.get("workflow_settings"),
+            transition_mode=str(data.get("transition_mode", "continuation")),
         )
         return web.json_response(snapshot)
     except FileNotFoundError as exc:
